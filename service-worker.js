@@ -1,4 +1,4 @@
-const CACHE_NAME = "spirits-pwa-v2";
+const CACHE_NAME = "spirits-pwa-v3";
 const ASSETS = [
   "./",
   "./index.html",
@@ -6,6 +6,9 @@ const ASSETS = [
   "./app.js",
   "./manifest.webmanifest",
   "./icon.svg",
+  "./icon-192.png",
+  "./icon-512.png",
+  "./apple-touch-icon.png",
   "./assets/video/intro_spirits.mov",
   "./assets/audio/isopalia.mp3",
   "./assets/audio/many_villains_victory.mp3",

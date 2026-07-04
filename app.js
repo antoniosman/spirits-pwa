@@ -30,6 +30,9 @@ let state = freshState();
 let introDone = false;
 let currentAudio = null;
 let seerReturnsToNightResolution = false;
+let currentIntroVideo = null;
+let speechUnlocked = false;
+let activeUtterance = null;
 
 function freshState() {
   return {
@@ -228,6 +231,15 @@ function cinematic(text, accent = "var(--danger)") {
   return panel;
 }
 
+function showConfirm({ kicker = "επιβεβαίωση", title, message, accent = "var(--pink)", confirmText = "Confirm", onConfirm, backText = "Πίσω", onBack }) {
+  const root = screen(kicker, title);
+  root.append(cinematic(message, accent));
+  root.append(actions(
+    button(confirmText, onConfirm),
+    button(backText, onBack || showDashboard, "ghost")
+  ));
+}
+
 function addHistory(root) {
   if (!state.log.length) return;
   const box = h("section", { className: "history" }, [h("h2", { text: "Ιστορικό" })]);
@@ -242,20 +254,36 @@ function showIntroVideo() {
   const video = h("video", {
     className: "intro-video",
     src: "assets/video/intro_spirits.mov",
-    autoplay: true,
-    playsInline: true,
-    onClick: finishIntro
+    playsInline: true
   });
-  video.muted = true;
+  currentIntroVideo = video;
+  video.preload = "auto";
+  video.muted = false;
+  video.volume = 1;
   video.addEventListener("ended", finishIntro);
-  root.append(video, h("div", { className: "skip", text: "πάτα για παράλειψη", onClick: finishIntro }));
+  root.append(
+    video,
+    actions(
+      button("Έναρξη intro με ήχο", () => {
+        unlockSpeech();
+        video.muted = false;
+        video.volume = 1;
+        video.currentTime = 0;
+        video.play().catch(() => toast("Το iOS μπλόκαρε τον ήχο. Πάτα ξανά ή έλεγξε silent mode."));
+      }),
+      button("Παράλειψη intro", finishIntro, "ghost")
+    )
+  );
   $app.append(root);
-  setTimeout(finishIntro, 45000);
 }
 
 function finishIntro() {
   if (introDone) return;
   introDone = true;
+  if (currentIntroVideo) {
+    currentIntroVideo.pause();
+    currentIntroVideo = null;
+  }
   showIntro();
 }
 
@@ -340,9 +368,17 @@ function showGameMasterSelection() {
   }))));
   root.append(actions(button("Ορισμός Game Master", () => {
     if (!state.gameMaster) return toast("Διάλεξε ποιος πέθανε πρώτος.");
-    state.eliminated = [state.gameMaster];
-    state.log.push(`${state.gameMaster} πέθανε πρώτος και έγινε Game Master.`);
-    showKillerSelection();
+    showConfirm({
+      title: state.gameMaster,
+      message: `Επιβεβαίωσε ότι ο/η ${state.gameMaster} πέθανε πρώτος/η και γίνεται Game Master.`,
+      confirmText: "Confirm Game Master",
+      onConfirm: () => {
+        state.eliminated = [state.gameMaster];
+        state.log.push(`${state.gameMaster} πέθανε πρώτος και έγινε Game Master.`);
+        showKillerSelection();
+      },
+      onBack: showGameMasterSelection
+    });
   })));
 }
 
@@ -409,7 +445,13 @@ function showRolePicker(roleTitle, setter) {
       crossed: disabled,
       enabled: !disabled,
       label: roleLabel(player),
-      onClick: () => setter(player)
+      onClick: () => showConfirm({
+        title: `${roleTitle}: ${player.name}`,
+        message: `Επιβεβαίωσε ότι ο/η ${player.name} παίρνει τον ρόλο ${roleTitle}.`,
+        confirmText: "Confirm role",
+        onConfirm: () => setter(player),
+        onBack: () => showRolePicker(roleTitle, setter)
+      })
     });
   })));
   root.append(actions(button("Πίσω", showSpecialRoles, "ghost")));
@@ -487,15 +529,28 @@ function showWitchSavePick() {
       crossed: disabled,
       enabled: !disabled,
       onClick: () => {
-        state.witchSave = id(player);
-        beginSeerStepForNight();
+        confirmWitchSave(player);
       }
     });
   })));
   root.append(actions(button("Η Μάγισσα δεν σώζει κανέναν", () => {
-    state.witchSave = null;
-    beginSeerStepForNight();
+    confirmWitchSave(null);
   }, "secondary")));
+}
+
+function confirmWitchSave(player) {
+  showConfirm({
+    kicker: "μάγισσα",
+    title: player ? `Σώζει: ${player.name}` : "Δεν σώζει κανέναν",
+    message: player ? `Επιβεβαίωσε ότι η Μάγισσα προσπάθησε να σώσει τον/την ${player.name}.` : "Επιβεβαίωσε ότι η Μάγισσα δεν σώζει κανέναν αυτή τη νύχτα.",
+    accent: "var(--lilac)",
+    confirmText: "Confirm witch action",
+    onConfirm: () => {
+      state.witchSave = id(player);
+      beginSeerStepForNight();
+    },
+    onBack: showWitchSavePick
+  });
 }
 
 function beginSeerStepForNight() {
@@ -509,8 +564,20 @@ function showSeerGuess() {
   root.append(paragraph("Ο Μάντης διαλέγει έναν παίκτη. Ο Game Master βλέπει τον πραγματικό ρόλο και του τον λέει."));
   root.append(grid(state.gamePlayers.map(byName).map(player => {
     const disabled = inList(state.eliminated, player) || id(player) === state.seer;
-    return playerCard(player, { crossed: disabled, enabled: !disabled, onClick: () => showSeerAnswer(player) });
+    return playerCard(player, { crossed: disabled, enabled: !disabled, onClick: () => confirmSeerGuess(player) });
   })));
+}
+
+function confirmSeerGuess(player) {
+  showConfirm({
+    kicker: "μάντης",
+    title: `Μαντεύει: ${player.name}`,
+    message: `Επιβεβαίωσε ότι ο Μάντης θέλει να δει τον ρόλο του/της ${player.name}.`,
+    accent: "var(--lilac)",
+    confirmText: "Confirm seer guess",
+    onConfirm: () => showSeerAnswer(player),
+    onBack: showSeerGuess
+  });
 }
 
 function showSeerAnswer(player) {
@@ -666,7 +733,16 @@ function showKingTieBreak(tiedPlayers) {
   const root = screen("βασιλιάς", "Ποιος φεύγει;");
   playSound("isopalia");
   root.append(paragraph("Ο Βασιλιάς αποκαλύπτει τον ρόλο του και διαλέγει έναν από τους ισόψηφους."));
-  root.append(grid(tiedPlayers.map(player => playerCard(player, { onClick: () => voteOut(player) }))));
+  root.append(grid(tiedPlayers.map(player => playerCard(player, {
+    onClick: () => showConfirm({
+      kicker: "βασιλιάς",
+      title: `Φεύγει: ${player.name}`,
+      message: `Επιβεβαίωσε ότι ο Βασιλιάς διαλέγει να αποχωρήσει ο/η ${player.name}.`,
+      confirmText: "Confirm king choice",
+      onConfirm: () => voteOut(player),
+      onBack: () => showKingTieBreak(tiedPlayers)
+    })
+  }))));
 }
 
 function voteOut(player) {
@@ -739,12 +815,21 @@ function showManualElimination() {
       enabled: !disabled,
       label: roleLabel(player),
       onClick: () => {
-        const reveal = revealRole(player);
-        const spoken = spokenRole(player);
-        eliminate(player);
-        state.log.push(`${player.name} αφαιρέθηκε χειροκίνητα. Ρόλος: ${reveal}.`);
-        speak(`${player.name} was out. ${player.name} was ${spoken}`);
-        showDashboard();
+        showConfirm({
+          kicker: "χειροκίνητη αποχώρηση",
+          title: `Βγαίνει: ${player.name}`,
+          message: `Επιβεβαίωσε ότι ο/η ${player.name} βγαίνει χειροκίνητα από το παιχνίδι.`,
+          confirmText: "Confirm out",
+          onConfirm: () => {
+            const reveal = revealRole(player);
+            const spoken = spokenRole(player);
+            eliminate(player);
+            state.log.push(`${player.name} αφαιρέθηκε χειροκίνητα. Ρόλος: ${reveal}.`);
+            speak(`${player.name} was out. ${player.name} was ${spoken}`);
+            showDashboard();
+          },
+          onBack: showManualElimination
+        });
       }
     });
   })));
@@ -816,26 +901,48 @@ function shuffle(list) {
 
 function speak(value) {
   if (!("speechSynthesis" in window)) return;
+  unlockSpeech();
   window.speechSynthesis.cancel();
-  const utterance = new SpeechSynthesisUtterance(ttsText(value));
-  utterance.lang = "en-US";
-  utterance.rate = 0.9;
-  utterance.pitch = 0.98;
-  window.speechSynthesis.speak(utterance);
+  activeUtterance = new SpeechSynthesisUtterance(ttsText(value));
+  activeUtterance.lang = "en-US";
+  activeUtterance.rate = 0.88;
+  activeUtterance.pitch = 1;
+  const voice = bestEnglishVoice();
+  if (voice) activeUtterance.voice = voice;
+  activeUtterance.onend = () => { activeUtterance = null; };
+  activeUtterance.onerror = () => { activeUtterance = null; };
+  window.speechSynthesis.speak(activeUtterance);
+  setTimeout(() => window.speechSynthesis.resume(), 80);
+}
+
+function unlockSpeech() {
+  if (!("speechSynthesis" in window)) return;
+  speechUnlocked = true;
+  window.speechSynthesis.resume();
+  window.speechSynthesis.getVoices();
+}
+
+function bestEnglishVoice() {
+  if (!("speechSynthesis" in window)) return null;
+  const voices = window.speechSynthesis.getVoices();
+  return voices.find(voice => voice.lang === "en-US" && /samantha|ava|allison|google|natural/i.test(voice.name))
+    || voices.find(voice => voice.lang === "en-US")
+    || voices.find(voice => voice.lang && voice.lang.startsWith("en"))
+    || null;
 }
 
 function ttsText(value) {
   return value
-    .replaceAll("Alex", "Ah-leks")
-    .replaceAll("Rino", "Ree-no")
+    .replaceAll("Alex", "Alex")
+    .replaceAll("Rino", "Reeno")
     .replaceAll("Billy", "Billy")
-    .replaceAll("Demarin", "Deh-mah-reen")
+    .replaceAll("Demarin", "Deh mareen")
     .replaceAll("Elisa", "Elisa Lanchava")
     .replaceAll("Evelyn", "Evelyn")
-    .replaceAll("Sargenie", "Sar-jee-nee")
-    .replaceAll("Sorina", "So-ree-na")
-    .replaceAll("Evaggelia", "Eva-nge-lee-a")
-    .replaceAll("Zoe", "Zo-ee");
+    .replaceAll("Sargenie", "Sarjeenee")
+    .replaceAll("Sorina", "Soreena")
+    .replaceAll("Evaggelia", "Evangelia")
+    .replaceAll("Zoe", "Zoey");
 }
 
 function playSound(kind) {
@@ -862,7 +969,18 @@ if ("serviceWorker" in navigator) {
 }
 
 document.addEventListener("click", () => {
-  if ("speechSynthesis" in window) window.speechSynthesis.resume();
+  unlockSpeech();
+  if (screen.orientation && screen.orientation.lock) {
+    screen.orientation.lock("portrait").catch(() => {});
+  }
 }, { once: true });
+
+window.addEventListener("orientationchange", () => {
+  setTimeout(() => {
+    if (screen.orientation && screen.orientation.lock) {
+      screen.orientation.lock("portrait").catch(() => {});
+    }
+  }, 250);
+});
 
 showIntroVideo();
