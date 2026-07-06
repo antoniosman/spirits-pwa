@@ -879,15 +879,19 @@ function showFirstRoundReplacement(fallenKiller) {
   if (!candidates.length) return showGameOver("Τα Spirits κέρδισαν. Όλοι οι δολοφόνοι βρέθηκαν.", true);
   removeFrom(state.killers, byName(state.pendingFirstRoundFallenKiller));
   const root = screen("ανατροπή πρώτου γύρου", "Οι δολοφόνοι επιλέγουν διάδοχο");
-  root.append(cinematic(`Ο/Η ${state.pendingFirstRoundFallenKiller || "δολοφόνος"} βγήκε στον πρώτο γύρο. Οι δολοφόνοι μπορούν να μετατρέψουν έναν ζωντανό παίκτη σε νέο δολοφόνο.`));
+  root.classList.add("twist-screen");
+  playSound("isopalia");
+  root.append(cinematic(`Ο/Η ${state.pendingFirstRoundFallenKiller || "δολοφόνος"} βγήκε στον πρώτο γύρο. Οι δολοφόνοι μπορούν να μετατρέψουν έναν ζωντανό παίκτη σε νέο δολοφόνο. Η επιλογή θα χρειαστεί επιβεβαίωση.`, "var(--danger)"));
   root.append(grid(candidates.map(player => playerCard(player, { onClick: () => confirmFirstRoundReplacement(player) }))));
 }
 
 function confirmFirstRoundReplacement(replacement) {
   const root = screen("νέος δολοφόνος", replacement.name);
-  root.append(cinematic(`Κλείδωσε τον/την ${replacement.name} ως νέο δολοφόνο. Αν είχε ειδικό ρόλο, ο ρόλος θα μεταφερθεί σε άλλο Spirit.`));
+  root.classList.add("twist-screen");
+  playSound("isopalia");
+  root.append(cinematic(`Τελική επιβεβαίωση: ο/η ${replacement.name} θα γίνει νέος δολοφόνος. Αν είχε ειδικό ρόλο, ο ρόλος θα μεταφερθεί σε άλλο Spirit.`, "var(--danger)"));
   root.append(actions(
-    button("Confirm twist", () => {
+    button("Confirm new murderer", () => {
       const movedRole = reassignSpecialRoleIfNeeded(replacement);
       addTo(state.killers, replacement);
       state.log.push(`${replacement.name} έγινε νέος δολοφόνος στον πρώτο γύρο.${movedRole ? " " + movedRole : ""}`);
@@ -999,6 +1003,7 @@ function showPlacementLoading() {
   stopSound();
   const root = screen("τελική αναφορά", "Φόρτωση κατάταξης");
   root.append(h("section", { className: "loading-panel" }, [
+    h("div", { className: "knife-loader" }),
     h("div", { className: "scanner" }),
     h("div", { className: "loading-title", text: "Murder board loading..." }),
     paragraph("Το Spirits ανοίγει τους φακέλους αποχώρησης.", "center")
