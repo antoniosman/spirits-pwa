@@ -53,7 +53,9 @@ function freshState() {
     killerCount: 2,
     round: 1,
     votingIndex: 0,
-    blankVotes: 0
+    blankVotes: 0,
+    lastSpiritsWin: null,
+    lastVictorySound: null
   };
 }
 
@@ -886,9 +888,11 @@ function killerWinMessage() {
 }
 
 function showGameOver(message, spiritsWin) {
+  state.lastSpiritsWin = spiritsWin;
+  state.lastVictorySound = spiritsWin ? "spirits" : (livingKillers().length === 1 && livingPlayers().length <= 3 ? "oneVillain" : "manyVillains");
   const root = screen("τέλος παιχνιδιού", "Game Over");
   root.append(cinematic(message, spiritsWin ? "var(--mint)" : "var(--danger)"), winnerPanel(spiritsWin));
-  playSound(spiritsWin ? "spirits" : (livingKillers().length === 1 && livingPlayers().length <= 3 ? "oneVillain" : "manyVillains"));
+  playSound(state.lastVictorySound);
   speak(spiritsWin ? "The spirits win" : "The murderers win");
   addHistory(root);
   root.append(actions(button("Δες κατάταξη", showPlacementLoading)));
@@ -914,27 +918,32 @@ function showPlacementLoading() {
 }
 
 function showPlacements() {
-  const winners = livingKillers().length ? livingKillers() : livingNonKillers();
+  const winnerGroup = state.lastSpiritsWin ? livingNonKillers() : livingKillers();
+  const finalPlayers = [
+    ...winnerGroup,
+    ...livingPlayers().filter(player => !winnerGroup.some(winner => winner.name === player.name))
+  ];
   const eliminated = state.placements
     .slice()
     .reverse()
-    .filter(entry => !winners.some(player => player.name === entry.name));
+    .filter(entry => !finalPlayers.some(player => player.name === entry.name));
   const root = screen("placements", "Τελική κατάταξη");
   root.append(h("div", { className: "placement-subtitle", text: "Spirits: Final Files" }));
+  playSound(state.lastVictorySound || "spirits");
 
   const board = h("section", { className: "placements-board" });
-  winners.forEach(player => {
+  finalPlayers.forEach((player, index) => {
     board.append(placementCard({
       player,
-      place: "Winner",
+      place: index === 0 ? "Winner" : `${index + 1}η θέση`,
       role: revealRole(player),
       reason: "Finalist"
-    }, true));
+    }, winnerGroup.some(winner => winner.name === player.name)));
   });
   eliminated.forEach((entry, index) => {
     board.append(placementCard({
       player: byName(entry.name),
-      place: `${winners.length + index + 1}η θέση`,
+      place: `${finalPlayers.length + index + 1}η θέση`,
       role: entry.role,
       reason: placementReason(entry.reason)
     }));
