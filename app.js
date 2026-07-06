@@ -657,7 +657,96 @@ function showVotingTurn() {
     const disabled = inList(state.eliminated, candidate) || id(candidate) === id(voter);
     return playerCard(candidate, { crossed: disabled, enabled: !disabled, onClick: () => showVoteConfirm(voter, candidate) });
   })));
-  root.append(actions(button("Λευκή ψήφος", () => showVoteConfirm(voter, null), "secondary")));
+  root.append(actions(
+    button("🎙 Πες όνομα", () => startVoteRecognition(voter), "secondary"),
+    button("Λευκή ψήφος", () => showVoteConfirm(voter, null), "secondary")
+  ));
+}
+
+function startVoteRecognition(voter) {
+  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+  if (!Recognition) {
+    toast("Η αναγνώριση φωνής δεν υποστηρίζεται σε αυτή τη συσκευή/browser.");
+    return;
+  }
+  const recognition = new Recognition();
+  recognition.lang = "en-US";
+  recognition.interimResults = false;
+  recognition.maxAlternatives = 4;
+  toast("Άκουω... πες το όνομα του παίκτη.");
+  recognition.onresult = event => {
+    const heard = Array.from(event.results[0])
+      .map(result => result.transcript)
+      .join(" ");
+    const candidate = matchVoteSpeech(heard, voter);
+    if (candidate === "blank") {
+      showVoteConfirm(voter, null);
+    } else if (candidate) {
+      showVoteConfirm(voter, candidate);
+    } else {
+      toast(`Δεν βρήκα παίκτη από: ${heard}`);
+    }
+  };
+  recognition.onerror = event => {
+    toast(event.error === "not-allowed" ? "Δώσε άδεια μικροφώνου στο Safari/Browser." : "Δεν άκουσα καθαρά. Δοκίμασε ξανά.");
+  };
+  recognition.start();
+}
+
+function matchVoteSpeech(heard, voter) {
+  const value = normalizeSpeech(heard);
+  if (!value) return null;
+  if (["blank", "white", "lefki", "leuki", "lefko", "λευκη", "λευκο"].some(word => value.includes(word))) {
+    return "blank";
+  }
+  const candidates = livingPlayers().filter(player => player.name !== voter.name);
+  let best = null;
+  for (const player of candidates) {
+    const aliases = speechAliases(player.name);
+    if (aliases.some(alias => value.includes(normalizeSpeech(alias)))) {
+      best = player;
+      break;
+    }
+  }
+  return best;
+}
+
+function speechAliases(name) {
+  const map = {
+    Alex: ["Alex", "Αλεξ"],
+    Billy: ["Billy", "Billie", "Μπιλυ"],
+    Catherine: ["Catherine", "Katherine", "Κατεριν"],
+    Demarin: ["Demarin", "Deh mareen", "Demarine", "Ντεμαριν"],
+    Elisa: ["Elisa", "Elisa Lanchava", "Lanchava", "Ελισα"],
+    Eva: ["Eva", "Εβα"],
+    Evaggelia: ["Evaggelia", "Evangelia", "Ευαγγελια"],
+    Evelyn: ["Evelyn", "Εβελυν"],
+    Hope: ["Hope"],
+    Jasmine: ["Jasmine", "Jasmin"],
+    Luna: ["Luna", "Λουνα"],
+    Pauline: ["Pauline", "Polin"],
+    Phillip: ["Phillip", "Philip"],
+    Rino: ["Rino", "Reeno", "Ρινο"],
+    Sargenie: ["Sargenie", "Sarjeenee", "Sargini", "Σαρτζινι"],
+    Smaragda: ["Smaragda", "Σμαραγδα"],
+    Sorina: ["Sorina", "Soreena", "Σορινα"],
+    Tony: ["Tony", "Toni"],
+    Vicky: ["Vicky", "Vicki", "Βικυ"],
+    Violet: ["Violet", "Βιολετ"],
+    Zoe: ["Zoe", "Zoey", "Ζωη"],
+    Irene: ["Irene", "Eirini", "Irini", "Ειρηνη"]
+  };
+  return map[name] || [name];
+}
+
+function normalizeSpeech(value) {
+  return (value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^\p{L}\p{N}\s]/gu, " ")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 function voteProgressPanel(voted, total) {
@@ -933,12 +1022,13 @@ function showPlacements() {
 
   const board = h("section", { className: "placements-board" });
   finalPlayers.forEach((player, index) => {
+    const isWinner = winnerGroup.some(winner => winner.name === player.name);
     board.append(placementCard({
       player,
-      place: index === 0 ? "Winner" : `${index + 1}η θέση`,
+      place: isWinner ? "Winner" : `${index + 1}η θέση`,
       role: revealRole(player),
       reason: "Finalist"
-    }, winnerGroup.some(winner => winner.name === player.name)));
+    }, isWinner));
   });
   eliminated.forEach((entry, index) => {
     board.append(placementCard({
