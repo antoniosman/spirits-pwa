@@ -38,6 +38,7 @@ function freshState() {
   return {
     gamePlayers: [],
     eliminated: [],
+    placements: [],
     killers: [],
     log: [],
     tally: {},
@@ -121,6 +122,14 @@ function spokenRole(player) {
   if (id(player) === state.witch) return "the witch";
   if (id(player) === state.king) return "the king";
   return "a spirit";
+}
+
+function placementReason(reason) {
+  if (reason === "murdered") return "Δολοφονήθηκε";
+  if (reason === "voted") return "Ψηφοφορία";
+  if (reason === "manual") return "Χειροκίνητα";
+  if (reason === "winner") return "Νικητής";
+  return "Εκτός";
 }
 
 function roleLabel(player) {
@@ -379,7 +388,22 @@ function showGameMasterSelection() {
       },
       onBack: showGameMasterSelection
     });
-  })));
+  }), button("Τυχαίος Game Master", () => {
+    const pick = shuffle(state.gamePlayers.map(byName))[0];
+    if (!pick) return;
+    state.gameMaster = pick.name;
+    showConfirm({
+      title: state.gameMaster,
+      message: `Τυχαία επιλογή: ο/η ${state.gameMaster} πέθανε πρώτος/η και γίνεται Game Master.`,
+      confirmText: "Confirm random GM",
+      onConfirm: () => {
+        state.eliminated = [state.gameMaster];
+        state.log.push(`${state.gameMaster} πέθανε πρώτος και έγινε Game Master.`);
+        showKillerSelection();
+      },
+      onBack: showGameMasterSelection
+    });
+  }, "secondary")));
 }
 
 function showKillerSelection() {
@@ -608,7 +632,7 @@ function showNightResolution() {
     : `Η Μάγισσα προσπάθησε να σώσει ${roleName(byName(state.witchSave))}. Ο/Η ${target.name} δολοφονήθηκε. Ρόλος: ${revealRole(target)}.`;
   root.append(cinematic(message, saved ? "var(--mint)" : "var(--danger)"));
   speak(saved ? `The witch saved ${byName(state.witchSave).name}` : `${target.name} was murdered. ${target.name} was ${spokenRole(target)}`);
-  if (!saved) eliminate(target);
+  if (!saved) eliminate(target, "murdered", revealRole(target));
   state.log.push(`Νύχτα ${state.round}: ${message}`);
   root.append(actions(button("Συνέχεια ημέρας", showDashboard)));
 }
@@ -748,7 +772,7 @@ function showKingTieBreak(tiedPlayers) {
 function voteOut(player) {
   const reveal = revealRole(player);
   const spoken = spokenRole(player);
-  eliminate(player);
+  eliminate(player, "voted", reveal);
   state.log.push(`${player.name} αποχώρησε από ψηφοφορία. Ρόλος: ${reveal}.`);
   speak(`${player.name} was voted out. ${player.name} was ${spoken}`);
   if (state.round === 1 && inList(state.killers, player)) return showFirstRoundReplacement(player);
@@ -823,7 +847,7 @@ function showManualElimination() {
           onConfirm: () => {
             const reveal = revealRole(player);
             const spoken = spokenRole(player);
-            eliminate(player);
+            eliminate(player, "manual", reveal);
             state.log.push(`${player.name} αφαιρέθηκε χειροκίνητα. Ρόλος: ${reveal}.`);
             speak(`${player.name} was out. ${player.name} was ${spoken}`);
             showDashboard();
@@ -867,7 +891,7 @@ function showGameOver(message, spiritsWin) {
   playSound(spiritsWin ? "spirits" : (livingKillers().length === 1 && livingPlayers().length <= 3 ? "oneVillain" : "manyVillains"));
   speak(spiritsWin ? "The spirits win" : "The murderers win");
   addHistory(root);
-  root.append(actions(button("Νέο παιχνίδι", showIntro)));
+  root.append(actions(button("Δες κατάταξη", showPlacementLoading)));
 }
 
 function winnerPanel(spiritsWin) {
@@ -878,8 +902,82 @@ function winnerPanel(spiritsWin) {
   ]);
 }
 
-function eliminate(player) {
+function showPlacementLoading() {
+  stopSound();
+  const root = screen("τελική αναφορά", "Φόρτωση κατάταξης");
+  root.append(h("section", { className: "loading-panel" }, [
+    h("div", { className: "scanner" }),
+    h("div", { className: "loading-title", text: "Murder board loading..." }),
+    paragraph("Το Spirits ανοίγει τους φακέλους αποχώρησης.", "center")
+  ]));
+  setTimeout(showPlacements, 950);
+}
+
+function showPlacements() {
+  const winners = livingKillers().length ? livingKillers() : livingNonKillers();
+  const eliminated = state.placements
+    .slice()
+    .reverse()
+    .filter(entry => !winners.some(player => player.name === entry.name));
+  const root = screen("placements", "Τελική κατάταξη");
+  root.append(h("div", { className: "placement-subtitle", text: "Spirits: Final Files" }));
+
+  const board = h("section", { className: "placements-board" });
+  winners.forEach(player => {
+    board.append(placementCard({
+      player,
+      place: "Winner",
+      role: revealRole(player),
+      reason: "Finalist"
+    }, true));
+  });
+  eliminated.forEach((entry, index) => {
+    board.append(placementCard({
+      player: byName(entry.name),
+      place: `${winners.length + index + 1}η θέση`,
+      role: entry.role,
+      reason: placementReason(entry.reason)
+    }));
+  });
+  root.append(board);
+
+  const gm = byName(state.gameMaster);
+  if (gm) {
+    root.append(h("section", { className: "gm-box" }, [
+      h("div", { className: "label", text: "GAME MASTER - εκτός κατάταξης" }),
+      placementCard({
+        player: gm,
+        place: "Game Master",
+        role: "Δεν υπολογίζεται",
+        reason: "Πρώτος νεκρός"
+      })
+    ]));
+  }
+
+  root.append(actions(button("Νέο παιχνίδι", showIntro)));
+}
+
+function placementCard(entry, winner = false) {
+  if (!entry.player) return h("div");
+  return h("article", { className: `placement-card ${winner ? "winner" : ""}` }, [
+    h("img", { src: imgPath(entry.player), alt: entry.player.name }),
+    h("div", { className: "placement-name", text: entry.player.name }),
+    h("div", { className: "placement-place", text: entry.place }),
+    h("div", { className: "placement-meta", text: entry.role }),
+    h("div", { className: "placement-meta", text: entry.reason })
+  ]);
+}
+
+function eliminate(player, reason = "out", role = null) {
+  const wasAlreadyOut = inList(state.eliminated, player);
   addTo(state.eliminated, player);
+  if (!wasAlreadyOut && id(player) !== state.gameMaster) {
+    state.placements.push({
+      name: player.name,
+      role: role || revealRole(player),
+      reason
+    });
+  }
   clearSpecialRole(player);
 }
 
