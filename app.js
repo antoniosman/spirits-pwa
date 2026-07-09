@@ -10,9 +10,12 @@ const roster = [
   ["Eva", "char_eva.png"],
   ["Evaggelia", "char_evaggelia.png"],
   ["Evelyn", "char_evelyn.webp"],
+  ["Ester", "char_ester.png"],
   ["Hope", "char_hope.webp"],
+  ["Ian", "char_ian.png"],
   ["Jasmine", "char_jasmine.png"],
   ["Luna", "char_luna.webp"],
+  ["Paul", "char_paul.png"],
   ["Pauline", "char_pauline.webp"],
   ["Phillip", "char_phillip.webp"],
   ["Rino", "char_rino.webp"],
@@ -22,6 +25,7 @@ const roster = [
   ["Tony", "char_tony.webp"],
   ["Vicky", "char_vicky.jpg"],
   ["Violet", "char_violet.png"],
+  ["Vincent", "char_vincent.jpg"],
   ["Zoe", "char_zoe.jpeg"],
   ["Irene", "char_irene.png"]
 ].map(([name, file]) => ({ name, file }));
@@ -778,15 +782,12 @@ function showVoteConfirm(voter, candidate) {
   root.append(cinematic(candidate ? `Επιβεβαίωσε ότι ο/η ${voter.name} ψηφίζει ${candidate.name}.` : `Επιβεβαίωσε ότι ο/η ${voter.name} ρίχνει λευκή ψήφο.`, candidate ? "var(--pink)" : "var(--lilac)"));
   root.append(actions(
     button("Confirm vote", () => {
-      const finalVote = state.votingIndex >= livingPlayers().length - 1;
       if (candidate) {
         state.tally[candidate.name] = (state.tally[candidate.name] || 0) + 1;
         state.log.push(`${voter.name} ψήφισε ${candidate.name}`);
-        if (!finalVote) speak(`${voter.name} voted ${candidate.name}`);
       } else {
         state.blankVotes += 1;
         state.log.push(`${voter.name} έριξε λευκή ψήφο.`);
-        if (!finalVote) speak(`${voter.name} voted blank`);
       }
       state.votingIndex += 1;
       showVotingTurn();

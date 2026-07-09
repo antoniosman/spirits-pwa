@@ -1,4 +1,4 @@
-const CACHE_NAME = "spirits-pwa-v7";
+const CACHE_NAME = "spirits-pwa-v8";
 const ASSETS = [
   "./",
   "./index.html",
@@ -22,10 +22,13 @@ const ASSETS = [
   "./assets/characters/char_eva.png",
   "./assets/characters/char_evaggelia.png",
   "./assets/characters/char_evelyn.webp",
+  "./assets/characters/char_ester.png",
   "./assets/characters/char_hope.webp",
+  "./assets/characters/char_ian.png",
   "./assets/characters/char_irene.png",
   "./assets/characters/char_jasmine.png",
   "./assets/characters/char_luna.webp",
+  "./assets/characters/char_paul.png",
   "./assets/characters/char_pauline.webp",
   "./assets/characters/char_phillip.webp",
   "./assets/characters/char_rino.webp",
@@ -35,6 +38,7 @@ const ASSETS = [
   "./assets/characters/char_tony.webp",
   "./assets/characters/char_vicky.jpg",
   "./assets/characters/char_violet.png",
+  "./assets/characters/char_vincent.jpg",
   "./assets/characters/char_zoe.jpeg"
 ];
 
