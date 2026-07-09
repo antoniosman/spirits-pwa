@@ -1,5 +1,4 @@
-const $app = document.getElementById("app");
-const $toast = document.getElementById("toast");
+const app = document.getElementById("app");
 
 const roster = [
   ["Alex", "char_alex.webp"],
@@ -7,12 +6,16 @@ const roster = [
   ["Catherine", "char_catherine.png"],
   ["Demarin", "char_demarin.webp"],
   ["Elisa", "char_elisa.webp"],
+  ["Ester", "char_ester.png"],
   ["Eva", "char_eva.png"],
   ["Evaggelia", "char_evaggelia.png"],
   ["Evelyn", "char_evelyn.webp"],
   ["Hope", "char_hope.webp"],
+  ["Ian", "char_ian.png"],
+  ["Irene", "char_irene.png"],
   ["Jasmine", "char_jasmine.png"],
   ["Luna", "char_luna.webp"],
+  ["Paul", "char_paul.png"],
   ["Pauline", "char_pauline.webp"],
   ["Phillip", "char_phillip.webp"],
   ["Rino", "char_rino.webp"],
@@ -22,1167 +25,1046 @@ const roster = [
   ["Tony", "char_tony.webp"],
   ["Vicky", "char_vicky.jpg"],
   ["Violet", "char_violet.png"],
-  ["Zoe", "char_zoe.jpeg"],
-  ["Irene", "char_irene.png"]
-].map(([name, file]) => ({ name, file }));
+  ["Vincent", "char_vincent.jpg"],
+  ["Zoe", "char_zoe.jpeg"]
+].map(([name, file]) => ({ id: name.toLowerCase(), name, file, alive: true, ally: null, allyUntilRound: 0 }));
 
-let state = freshState();
-let introDone = false;
-let currentAudio = null;
-let seerReturnsToNightResolution = false;
-let currentIntroVideo = null;
-let speechUnlocked = false;
-let activeUtterance = null;
+const state = {
+  count: 8,
+  selected: [],
+  players: [],
+  eliminated: [],
+  log: [],
+  round: 1,
+  active: null,
+  turnQueue: [],
+  king: null,
+  kingUsed: false,
+  token: 0,
+  ttt: Array(9).fill(0),
+  tttTurn: 1,
+  memory: [],
+  memoryStep: 3,
+  memoryInput: 0,
+  quizIndex: 0,
+  quizA: 0,
+  quizB: 0
+};
 
-function freshState() {
-  return {
-    gamePlayers: [],
-    eliminated: [],
-    placements: [],
-    killers: [],
-    log: [],
-    tally: {},
-    gameMaster: null,
-    seer: null,
-    witch: null,
-    king: null,
-    nightTarget: null,
-    witchSave: null,
-    pendingFirstRoundFallenKiller: null,
-    playerCount: 8,
-    killerCount: 2,
-    round: 1,
-    votingIndex: 0,
-    blankVotes: 0,
-    lastSpiritsWin: null,
-    lastVictorySound: null
-  };
+const qs = selector => document.querySelector(selector);
+const sample = list => list[Math.floor(Math.random() * list.length)];
+const shuffle = list => [...list].sort(() => Math.random() - 0.5);
+const alive = () => state.players.filter(p => p.alive);
+const candidatesExcept = p => alive().filter(x => x !== p);
+const img = p => `./assets/${p.file}`;
+let music = null;
+
+function nextActivePlayer() {
+  const living = alive();
+  state.turnQueue = state.turnQueue.filter(p => p && p.alive);
+  if (!state.turnQueue.length) state.turnQueue = shuffle(living);
+  return state.turnQueue.shift() || sample(living);
 }
 
-function id(player) {
-  return player && player.name;
+function removeFromTurnQueue(player) {
+  state.turnQueue = state.turnQueue.filter(p => p && p.alive && p !== player);
 }
 
-function byName(name) {
-  return roster.find(player => player.name === name) || null;
+function forceActivePlayer(player) {
+  state.active = player;
+  removeFromTurnQueue(player);
 }
 
-function inList(list, player) {
-  return !!player && list.includes(player.name);
+function playMusic(src, { loop = false, volume = 0.8 } = {}) {
+  try {
+    if (music) {
+      music.pause();
+      music.currentTime = 0;
+    }
+    music = new Audio(src);
+    music.loop = loop;
+    music.volume = volume;
+    music.play().catch(() => {});
+  } catch (_) {}
 }
 
-function addTo(list, player) {
-  if (player && !inList(list, player)) list.push(player.name);
+function stopMusic() {
+  if (!music) return;
+  music.pause();
+  music.currentTime = 0;
+  music = null;
 }
 
-function removeFrom(list, player) {
-  if (!player) return;
-  const index = list.indexOf(player.name);
-  if (index >= 0) list.splice(index, 1);
+function speak(text) {
+  if (!("speechSynthesis" in window)) return;
+  window.speechSynthesis.cancel();
+  const utter = new SpeechSynthesisUtterance(toEnglishSpeech(text));
+  utter.lang = "en-US";
+  utter.rate = 0.9;
+  utter.pitch = 0.78;
+  window.speechSynthesis.speak(utter);
 }
 
-function livingPlayers() {
-  return state.gamePlayers.map(byName).filter(player => player && !inList(state.eliminated, player));
+function toEnglishSpeech(text) {
+  const value = String(text || "");
+  if (/^[\x00-\x7F\s.,!?:;'’&()\-]+$/.test(value)) return value;
+  const names = roster.map(p => p.name).join("|");
+  const namePattern = new RegExp(`(${names})`);
+  const foundName = value.match(namePattern)?.[1] || "";
+  if (value.includes("κινδυνεύει")) return `${foundName || "Player"} selected for elimination.`;
+  if (value.includes("έφυγε")) return `${foundName || "Player"} eliminated.`;
+  if (value.includes("φορτώνει")) return "Spirits Box is loading.";
+  if (value.includes("Καλώς")) return "Welcome to Spirits Box.";
+  if (value.includes("Ενεργός παίκτης")) return `Active player, ${foundName}.`;
+  if (value.includes("Ο τροχός διάλεξε")) return `The wheel selected ${foundName}.`;
+  if (value.includes("κινδυνεύει")) return `${foundName || "Player"} selected for elimination.`;
+  if (value.includes("έφυγε")) return `${foundName} has been eliminated.`;
+  if (value.includes("Βγήκε")) return value.replace("Βγήκε", "Result").replace("χάνει", "loses");
+  if (value.includes("κέρδισε") || value.includes("κερδίζει")) return value.replace("κέρδισε", "won").replace("κερδίζει", "wins");
+  if (value.includes("χάνει")) return value.replace("χάνει", "loses");
+  if (value.includes("δένει") || value.includes("δέθηκαν")) return value.replace("και", "and").replace("δέθηκαν για τέσσερις γύρους", "are bound for four rounds");
+  if (value.includes("Καυτή Πατάτα")) return "Hot Potato.";
+  if (value.includes("Πάτα το Κουμπί")) return "Press the Button.";
+  if (value.includes("Τροχός")) return "The wheel is spinning.";
+  if (value.includes("ΨΗΦΟΦΟΡΙΑ")) return "Voting card.";
+  if (value.includes("ΜΟΝΟΜΑΧΙΑ")) return "Duel card.";
+  if (value.includes("ΧΑΟΣ")) return "Chaos card.";
+  if (value.includes("ΒΟΜΒΑ")) return "Bomb card.";
+  return value
+    .replaceAll("Πέτρα", "Rock")
+    .replaceAll("Ψαλίδι", "Scissors")
+    .replaceAll("Χαρτί", "Paper")
+    .replaceAll("Τρίλιζα", "Tic tac toe")
+    .replaceAll("Κορώνα Γράμματα", "Coin flip")
+    .replaceAll("Μνήμη", "Memory")
+    .replaceAll("Ερωτήσεις", "Questions")
+    .replaceAll("Ρουλέτα", "Roulette")
+    .replaceAll("Καυτή Πατάτα", "Hot Potato")
+    .replaceAll("Σώσε Έναν", "Save One")
+    .replaceAll("Δεμένη Μοίρα", "Bound Fate")
+    .replaceAll("Βασιλιάς", "King")
+    .replaceAll("Ασφαλής", "Safe")
+    .replaceAll("Διπλή", "Double")
+    .replaceAll("Υποψήφιος", "Nominee")
+    .replaceAll("Γύρος", "Round")
+    .replaceAll("Τελικός", "Finale")
+    .replaceAll("Ψηφοφορία", "Voting")
+    .replaceAll("Μονομαχία", "Duel")
+    .replaceAll("Αποχώρηση", "Elimination")
+    .replaceAll("Νικητής", "Winner");
 }
 
-function livingKillers() {
-  return state.killers.map(byName).filter(player => player && !inList(state.eliminated, player));
+function render(kicker, title, body) {
+  state.token++;
+  app.innerHTML = `
+    <section class="screen">
+      <div class="horror"><div class="box-mark"></div></div>
+      <div class="brand">SPIRITS BOX</div>
+      <div class="kicker">${kicker}</div>
+      <h1>${title}</h1>
+      <div id="content"></div>
+    </section>
+  `;
+  const content = qs("#content");
+  if (body) content.append(body);
+  return content;
 }
 
-function livingNonKillers() {
-  return livingPlayers().filter(player => !inList(state.killers, player));
+function el(tag, className, html) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (html !== undefined) node.innerHTML = html;
+  return node;
 }
 
-function roleName(player) {
-  return player ? player.name : "κανείς";
-}
-
-function names(players) {
-  return players.map(player => player.name).join(", ");
-}
-
-function maxKillers() {
-  if (state.playerCount <= 6) return 1;
-  if (state.playerCount <= 9) return 2;
-  if (state.playerCount <= 14) return 3;
-  if (state.playerCount <= 18) return 4;
-  if (state.playerCount <= 20) return 5;
-  return 6;
-}
-
-function revealRole(player) {
-  if (inList(state.killers, player)) return "Δολοφόνος";
-  if (id(player) === state.seer) return "Μάντης";
-  if (id(player) === state.witch) return "Μάγισσα";
-  if (id(player) === state.king) return "Βασιλιάς";
-  return "Spirit";
-}
-
-function spokenRole(player) {
-  if (inList(state.killers, player)) return "the murderer";
-  if (id(player) === state.seer) return "the seer";
-  if (id(player) === state.witch) return "the witch";
-  if (id(player) === state.king) return "the king";
-  return "a spirit";
-}
-
-function placementReason(reason) {
-  if (reason === "murdered") return "Δολοφονήθηκε";
-  if (reason === "voted") return "Ψηφοφορία";
-  if (reason === "manual") return "Χειροκίνητα";
-  if (reason === "winner") return "Νικητής";
-  return "Εκτός";
-}
-
-function roleLabel(player) {
-  const roles = [];
-  if (id(player) === state.gameMaster) roles.push("Game Master");
-  if (inList(state.killers, player)) roles.push("Δολοφόνος");
-  if (id(player) === state.seer) roles.push("Μάντης");
-  if (id(player) === state.witch) roles.push("Μάγισσα");
-  if (id(player) === state.king) roles.push("Βασιλιάς");
-  return roles.join(" / ");
-}
-
-function h(tag, options = {}, children = []) {
-  const element = document.createElement(tag);
-  if (options.className) element.className = options.className;
-  if (options.text !== undefined) element.textContent = options.text;
-  if (options.html !== undefined) element.innerHTML = options.html;
-  if (options.src) element.src = options.src;
-  if (options.alt !== undefined) element.alt = options.alt;
-  if (options.type) element.type = options.type;
-  if (options.controls) element.controls = true;
-  if (options.autoplay) element.autoplay = true;
-  if (options.playsInline) element.playsInline = true;
-  if (options.loop) element.loop = true;
-  if (options.onClick) element.addEventListener("click", options.onClick);
-  children.forEach(child => element.append(child));
-  return element;
-}
-
-function screen(kicker, title) {
-  stopSound();
-  $app.textContent = "";
-  const root = h("section", { className: "screen" });
-  root.append(
-    h("div", { className: "brand", text: "SPIRITS" }),
-    h("div", { className: "kicker", text: kicker }),
-    h("h1", { className: "title", text: title })
-  );
-  $app.append(root);
-  return root;
-}
-
-function paragraph(text, className = "") {
-  return h("p", { className: `paragraph ${className}`.trim(), text });
-}
-
-function pill(text) {
-  return h("div", { className: "pill", text });
-}
-
-function button(text, onClick, kind = "") {
-  return h("button", { className: `btn ${kind}`.trim(), text, onClick });
+function button(text, kind, onClick) {
+  const b = el("button", `btn ${kind || ""}`, text);
+  b.addEventListener("click", onClick);
+  return b;
 }
 
 function actions(...buttons) {
-  return h("div", { className: "actions" }, buttons);
+  const wrap = el("div", "actions");
+  buttons.filter(Boolean).forEach(b => wrap.append(b));
+  return wrap;
 }
 
-function toast(message) {
-  $toast.textContent = message;
-  $toast.classList.add("show");
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => $toast.classList.remove("show"), 2200);
+function paragraph(text) {
+  return el("p", "lead", text);
 }
 
-function imgPath(player) {
-  return `assets/characters/${player.file}`;
+function label(p) {
+  if (!p.alive) return "ΕΞΩ";
+  if (state.king === p && !state.kingUsed) return "Βασιλιάς";
+  if (p.ally && p.ally.alive) return `Δεμένος με ${p.ally.name} έως γύρο ${p.allyUntilRound}`;
+  return "Ζωντανός";
 }
 
-function playerCard(player, { selected = false, crossed = false, enabled = true, label = "", onClick = () => {} } = {}) {
-  const card = h("button", {
-    className: `card ${selected ? "selected" : ""} ${!enabled ? "disabled" : ""}`.trim(),
-    onClick: () => enabled && onClick()
-  });
-  const imageWrap = h("div");
-  imageWrap.style.position = "relative";
-  imageWrap.append(h("img", { className: "avatar", src: imgPath(player), alt: player.name }));
-  if (crossed) imageWrap.append(h("div", { className: "cross", text: "X" }));
-  card.append(imageWrap, h("div", { className: "card-name", text: player.name }));
-  if (label) card.append(h("div", { className: "card-role", text: label }));
+function playerCard(p, caption, onClick, selected = false) {
+  const card = el("button", `player-card ${selected ? "selected" : ""} ${!p.alive ? "dead" : ""}`);
+  card.innerHTML = `<img class="avatar" src="${img(p)}" alt="${p.name}"><strong>${p.name}</strong><span class="label">${caption || label(p)}</span>`;
+  if (onClick) card.addEventListener("click", () => onClick(p));
   return card;
 }
 
-function grid(cards) {
-  return h("div", { className: "grid" }, cards);
+function hero(p) {
+  const h = el("div", "hero");
+  h.innerHTML = `<img class="avatar" src="${img(p)}" alt="${p.name}"><h2>${p.name}</h2><div class="label">${label(p)}</div>`;
+  return h;
 }
 
-function statusPanel() {
-  return h("section", { className: "status" }, [
-    h("div", { className: "label", text: "PALERMO TABLET" }),
-    h("div", { className: "stats", text: `Ζωντανοί: ${livingPlayers().length}   Δολοφόνοι: ${livingKillers().length}   Εκτός: ${state.eliminated.length}` })
-  ]);
+function grid(players, caption, action, selectedFn) {
+  const g = el("div", "grid roster");
+  players.forEach(p => g.append(playerCard(p, typeof caption === "function" ? caption(p) : caption, action, selectedFn && selectedFn(p))));
+  return g;
 }
 
-function roleSummary() {
-  return h("div", {
-    className: "panel role-summary",
-    text: `Δολοφόνοι: ${names(state.killers.map(byName).filter(Boolean))}\nΜάντης: ${roleName(byName(state.seer))}\nΜάγισσα: ${roleName(byName(state.witch))}\nΒασιλιάς: ${roleName(byName(state.king))}`
+function statusBar() {
+  const s = el("div", "stats");
+  [["Ζωντανοί", alive().length], ["Γύρος", state.round], ["Έξω", state.eliminated.length]].forEach(([k, v]) => {
+    s.insertAdjacentHTML("beforeend", `<div class="stat">${k}<span>${v}</span></div>`);
   });
+  return s;
 }
 
-function cinematic(text, accent = "var(--danger)") {
-  const panel = h("section", { className: "cinematic" }, [
-    h("div", { className: "label", text: "SPIRITS CONTROL" }),
-    h("div", { className: "body", text })
-  ]);
-  panel.style.borderColor = accent;
-  return panel;
-}
-
-function showConfirm({ kicker = "επιβεβαίωση", title, message, accent = "var(--pink)", confirmText = "Confirm", onConfirm, backText = "Πίσω", onBack }) {
-  const root = screen(kicker, title);
-  root.append(cinematic(message, accent));
-  root.append(actions(
-    button(confirmText, onConfirm),
-    button(backText, onBack || showDashboard, "ghost")
-  ));
-}
-
-function addHistory(root) {
+function addLog(content, limit = 6) {
   if (!state.log.length) return;
-  const box = h("section", { className: "history" }, [h("h2", { text: "Ιστορικό" })]);
-  for (let i = state.log.length - 1; i >= 0; i--) box.append(paragraph(state.log[i]));
-  root.append(box);
+  const box = el("div", "log");
+  box.innerHTML = "<strong>Ιστορικό</strong>";
+  state.log.slice(-limit).reverse().forEach(x => box.append(paragraph(x)));
+  content.append(box);
 }
 
-function showIntroVideo() {
-  if (introDone) return showIntro();
-  $app.textContent = "";
-  const root = h("section", { className: "intro-screen" });
-  const video = h("video", {
-    className: "intro-video",
-    src: "assets/video/intro_spirits.mov",
-    playsInline: true
-  });
-  currentIntroVideo = video;
-  video.preload = "auto";
-  video.muted = false;
-  video.volume = 1;
-  video.addEventListener("ended", finishIntro);
-  root.append(
-    video,
-    actions(
-      button("Έναρξη intro με ήχο", () => {
-        unlockSpeech();
-        video.muted = false;
-        video.volume = 1;
-        video.currentTime = 0;
-        video.play().catch(() => toast("Το iOS μπλόκαρε τον ήχο. Πάτα ξανά ή έλεγξε silent mode."));
-      }),
-      button("Παράλειψη intro", finishIntro, "ghost")
-    )
+function showLoading() {
+  const content = render("ΦΟΡΤΩΣΗ", "Spirits Box");
+  content.append(paragraph("Το σκοτεινό τραπέζι ανοίγει..."));
+  speak("Spirits Box is loading.");
+  setTimeout(showHome, 900);
+}
+
+function showHome() {
+  stopMusic();
+  const content = render("ΠΑΙΧΝΙΔΙ ΑΠΟΧΩΡΗΣΗΣ", "Spirits Box");
+  [
+    ["Η εφαρμογή είναι παρουσιαστής", "Τραβάει κάρτες, τρέχει mini games, ψηφοφορίες, τροχούς, βόμβες και τελικό."],
+    ["PWA για iPad", "Άνοιξέ το στο Safari και κάνε Add to Home Screen για εγκατάσταση."],
+    ["Όλα μέσα στην εφαρμογή", "Τρίλιζα, Πέτρα Ψαλίδι Χαρτί, Memory, Tap Battle, Quiz, ζάρι, ρουλέτα και βόμβες."]
+  ].forEach(([a, b]) => content.append(el("div", "feature", `<strong>${a}</strong>${b}`)));
+  content.append(actions(button("Νέο παιχνίδι", "", showSetup)));
+}
+
+function showSetup() {
+  stopMusic();
+  const content = render("ΡΥΘΜΙΣΗ", "Παίκτες");
+  content.append(paragraph("Διάλεξε 6 έως 26 παίκτες."));
+  const row = el("div", "count-row");
+  const countNode = el("div", "count", state.count);
+  const nextButton = button("Επιλογή χαρακτήρων", "", () => { state.selected = []; showPlayerSelection(); });
+  const syncCount = () => {
+    state.count = Math.max(6, Math.min(26, state.count));
+    countNode.textContent = state.count;
+    nextButton.textContent = `Επιλογή ${state.count} χαρακτήρων`;
+  };
+  row.append(
+    button("-", "secondary small", () => { state.count--; syncCount(); }),
+    countNode,
+    button("+", "secondary small", () => { state.count++; syncCount(); })
   );
-  $app.append(root);
-}
-
-function finishIntro() {
-  if (introDone) return;
-  introDone = true;
-  if (currentIntroVideo) {
-    currentIntroVideo.pause();
-    currentIntroVideo = null;
-  }
-  showIntro();
-}
-
-function showIntro() {
-  state = freshState();
-  const root = screen("κεντρικός συντονιστής", "Spirits");
-  root.append(
-    h("h2", { className: "title hero-title", text: "Game Master Mode" }),
-    paragraph("Βάλε το iPad στη μέση. Ο πρώτος παίκτης που πεθαίνει γίνεται Game Master και από εδώ ελέγχει δολοφόνους, ειδικούς ρόλους, νύχτα και ψηφοφορίες.", "center"),
-    actions(button("Νέο παιχνίδι", showSetupCounts))
-  );
-}
-
-function counterBlock(label, value, minus, plus, accent = "var(--lilac)") {
-  const block = h("section", { className: "counter" });
-  block.append(
-    h("div", { className: "counter-label", text: label }),
-    h("div", { className: "counter-number", text: String(value) }),
-    h("div", { className: "counter-controls" }, [
-      h("button", { className: "small", text: "-", onClick: minus }),
-      h("button", { className: "small", text: "+", onClick: plus })
-    ])
-  );
-  block.querySelector(".counter-label").style.color = accent;
-  block.querySelector(".counter-number").style.color = accent;
-  return block;
-}
-
-function showSetupCounts() {
-  state.killerCount = Math.max(1, Math.min(state.killerCount, maxKillers()));
-  const root = screen("ρύθμιση παιχνιδιού", "Παίκτες και δολοφόνοι");
-  root.append(
-    counterBlock("Παίκτες", state.playerCount, () => {
-      state.playerCount = Math.max(5, state.playerCount - 1);
-      state.killerCount = Math.max(1, Math.min(state.killerCount, maxKillers()));
-      showSetupCounts();
-    }, () => {
-      state.playerCount = Math.min(roster.length, state.playerCount + 1);
-      state.killerCount = Math.max(1, Math.min(state.killerCount, maxKillers()));
-      showSetupCounts();
-    }),
-    counterBlock("Δολοφόνοι", state.killerCount, () => {
-      state.killerCount = Math.max(1, state.killerCount - 1);
-      showSetupCounts();
-    }, () => {
-      const max = maxKillers();
-      if (state.killerCount >= max) return toast(`Maximum ${max} δολοφόνοι για ${state.playerCount} παίκτες.`);
-      state.killerCount += 1;
-      showSetupCounts();
-    }, "var(--danger)"),
-    actions(button("Επιλογή χαρακτήρων", showPlayerSelection))
-  );
+  syncCount();
+  content.append(row, actions(nextButton));
 }
 
 function showPlayerSelection() {
-  const root = screen("επιλογή παρέας", "Ποιοι παίζουν;");
-  root.append(pill(`${state.gamePlayers.length} / ${state.playerCount} επιλεγμένοι`));
-  root.append(grid(roster.map(player => playerCard(player, {
-    selected: inList(state.gamePlayers, player),
-    onClick: () => {
-      if (inList(state.gamePlayers, player)) removeFrom(state.gamePlayers, player);
-      else if (state.gamePlayers.length < state.playerCount) addTo(state.gamePlayers, player);
-      else return toast(`Έχεις ήδη διαλέξει ${state.playerCount} παίκτες.`);
-      showPlayerSelection();
-    }
-  }))));
-  root.append(actions(button("Συνέχεια", () => {
-    if (state.gamePlayers.length !== state.playerCount) return toast(`Διάλεξε ακριβώς ${state.playerCount} παίκτες.`);
-    showGameMasterSelection();
-  })));
-}
-
-function showGameMasterSelection() {
-  const root = screen("πρώτος νεκρός", "Ποιος πέθανε πρώτος;");
-  root.append(paragraph("Αυτός ο παίκτης βγαίνει από το παιχνίδι και γίνεται Game Master."));
-  root.append(grid(state.gamePlayers.map(byName).map(player => playerCard(player, {
-    selected: id(player) === state.gameMaster,
-    onClick: () => {
-      state.gameMaster = id(player);
-      showGameMasterSelection();
-    }
-  }))));
-  root.append(actions(button("Ορισμός Game Master", () => {
-    if (!state.gameMaster) return toast("Διάλεξε ποιος πέθανε πρώτος.");
-    showConfirm({
-      title: state.gameMaster,
-      message: `Επιβεβαίωσε ότι ο/η ${state.gameMaster} πέθανε πρώτος/η και γίνεται Game Master.`,
-      confirmText: "Confirm Game Master",
-      onConfirm: () => {
-        state.eliminated = [state.gameMaster];
-        state.log.push(`${state.gameMaster} πέθανε πρώτος και έγινε Game Master.`);
-        showKillerSelection();
-      },
-      onBack: showGameMasterSelection
-    });
-  }), button("Τυχαίος Game Master", () => {
-    const pick = shuffle(state.gamePlayers.map(byName))[0];
-    if (!pick) return;
-    state.gameMaster = pick.name;
-    showConfirm({
-      title: state.gameMaster,
-      message: `Τυχαία επιλογή: ο/η ${state.gameMaster} πέθανε πρώτος/η και γίνεται Game Master.`,
-      confirmText: "Confirm random GM",
-      onConfirm: () => {
-        state.eliminated = [state.gameMaster];
-        state.log.push(`${state.gameMaster} πέθανε πρώτος και έγινε Game Master.`);
-        showKillerSelection();
-      },
-      onBack: showGameMasterSelection
-    });
-  }, "secondary")));
-}
-
-function showKillerSelection() {
-  const root = screen("κρυφοί ρόλοι", "Ποιοι είναι δολοφόνοι;");
-  root.append(pill(`${state.killers.length} / ${state.killerCount} δολοφόνοι`));
-  root.append(grid(state.gamePlayers.map(byName).map(player => {
-    const disabled = inList(state.eliminated, player);
-    const selected = inList(state.killers, player);
-    return playerCard(player, {
-      selected,
-      crossed: disabled,
-      enabled: !disabled,
-      label: selected ? "Δολοφόνος" : "",
-      onClick: () => {
-        if (selected) removeFrom(state.killers, player);
-        else if (state.killers.length < state.killerCount) addTo(state.killers, player);
-        else return toast(`Έχεις ήδη διαλέξει ${state.killerCount} δολοφόνους.`);
-        showKillerSelection();
-      }
-    });
-  })));
-  root.append(actions(
-    button("Τυχαία επιλογή δολοφόνων", () => {
-      state.killers = shuffle(livingPlayers()).slice(0, state.killerCount).map(id);
-      showKillerSelection();
-    }, "secondary"),
-    button("Συνέχεια στους ειδικούς ρόλους", () => {
-      if (state.killers.length !== state.killerCount) return toast(`Διάλεξε ακριβώς ${state.killerCount} δολοφόνους.`);
-      showSpecialRoles();
+  const content = render("ΠΑΡΕΑ", `Διάλεξε ${state.count}`);
+  const counter = el("div", "panel selection-counter", `${state.selected.length} / ${state.count} επιλεγμένοι`);
+  content.append(counter);
+  const selectionGrid = el("div", "grid roster selection-roster");
+  roster.forEach(p => selectionGrid.append(selectionCard(p, counter)));
+  content.append(selectionGrid);
+  content.append(actions(
+    button(`Τυχαίοι ${state.count}`, "secondary", () => { state.selected = shuffle(roster).slice(0, state.count); updateSelectionUI(counter); }),
+    button("Κάθισε στο τραπέζι", "", () => {
+      if (state.selected.length !== state.count) return alert(`Διάλεξε ακριβώς ${state.count} παίκτες.`);
+      startGame();
     })
   ));
 }
 
-function showSpecialRoles() {
-  const root = screen("ειδικοί ρόλοι", "Μάντης, Μάγισσα, Βασιλιάς");
-  root.append(roleSummary());
-  root.append(actions(
-    button(`Μάντης: ${roleName(byName(state.seer))}`, () => showRolePicker("Μάντης", player => { state.seer = id(player); showSpecialRoles(); }), "secondary"),
-    button(`Μάγισσα: ${roleName(byName(state.witch))}`, () => showRolePicker("Μάγισσα", player => { state.witch = id(player); showSpecialRoles(); }), "secondary"),
-    button(`Βασιλιάς: ${roleName(byName(state.king))}`, () => showRolePicker("Βασιλιάς", player => { state.king = id(player); showSpecialRoles(); }), "secondary"),
-    button("Τυχαία επιλογή ειδικών ρόλων", () => {
-      const pool = shuffle(livingNonKillers());
-      state.seer = id(pool[0]) || null;
-      state.witch = id(pool[1]) || null;
-      state.king = id(pool[2]) || null;
-      showSpecialRoles();
-    }, "secondary"),
-    button("Έναρξη παιχνιδιού", () => {
-      if (!state.seer || !state.witch || !state.king) return toast("Διάλεξε όλους τους ειδικούς ρόλους ή πάτα τυχαία επιλογή.");
-      state.log.push("Οι ρόλοι ορίστηκαν. Το παιχνίδι ξεκινά.");
-      showDashboard();
-    })
-  ));
+function selectionCard(p, counter) {
+  const card = playerCard(p, state.selected.includes(p) ? "Παίζει" : "Πάτα για επιλογή", () => {
+    if (state.selected.includes(p)) state.selected = state.selected.filter(x => x !== p);
+    else if (state.selected.length < state.count) state.selected.push(p);
+    else return alert(`Έχεις ήδη διαλέξει ${state.count} παίκτες.`);
+    updateSelectionUI(counter);
+  }, state.selected.includes(p));
+  card.dataset.playerId = p.id;
+  card.setAttribute("aria-pressed", String(state.selected.includes(p)));
+  return card;
 }
 
-function showRolePicker(roleTitle, setter) {
-  const root = screen("ανάθεση ρόλου", roleTitle);
-  root.append(paragraph("Διάλεξε ποιος θα έχει αυτόν τον ρόλο. Ο πρώτος νεκρός και οι δολοφόνοι δεν προτείνονται για ειδικούς ρόλους."));
-  root.append(grid(state.gamePlayers.map(byName).map(player => {
-    const disabled = inList(state.eliminated, player) || inList(state.killers, player) || hasOtherSpecialRole(player, roleTitle);
-    return playerCard(player, {
-      selected: roleForTitle(roleTitle) === id(player),
-      crossed: disabled,
-      enabled: !disabled,
-      label: roleLabel(player),
-      onClick: () => showConfirm({
-        title: `${roleTitle}: ${player.name}`,
-        message: `Επιβεβαίωσε ότι ο/η ${player.name} παίρνει τον ρόλο ${roleTitle}.`,
-        confirmText: "Confirm role",
-        onConfirm: () => setter(player),
-        onBack: () => showRolePicker(roleTitle, setter)
-      })
-    });
-  })));
-  root.append(actions(button("Πίσω", showSpecialRoles, "ghost")));
-}
-
-function hasOtherSpecialRole(player, roleTitle) {
-  return (roleTitle !== "Μάντης" && id(player) === state.seer)
-    || (roleTitle !== "Μάγισσα" && id(player) === state.witch)
-    || (roleTitle !== "Βασιλιάς" && id(player) === state.king);
-}
-
-function roleForTitle(roleTitle) {
-  if (roleTitle === "Μάντης") return state.seer;
-  if (roleTitle === "Μάγισσα") return state.witch;
-  return state.king;
-}
-
-function showDashboard() {
-  if (checkGameOver()) return;
-  const root = screen("κέντρο ελέγχου", `Γύρος ${state.round}`);
-  root.append(statusPanel(), roleSummary());
-  root.append(actions(
-    button("Νύχτα", showNightStart),
-    button("Ψηφοφορία ημέρας", startDayVoting, "secondary"),
-    button("Χειροκίνητη αποχώρηση", showManualElimination, "secondary"),
-    button("Test voice", () => speak("Spirits voice test. Alex voted Billy."), "ghost")
-  ));
-  addHistory(root);
-}
-
-function showNightStart() {
-  state.nightTarget = null;
-  state.witchSave = null;
-  const root = screen("νύχτα", "Οι δολοφόνοι ξυπνούν");
-  root.append(paragraph("Ο Game Master ρωτά τους δολοφόνους ποιον σκοτώνουν και επιλέγει τον στόχο."));
-  root.append(actions(button("Επιλογή στόχου δολοφόνων", showNightKillPick), button("Πίσω", showDashboard, "ghost")));
-}
-
-function showNightKillPick() {
-  const root = screen("δολοφόνοι", "Ποιον σκοτώνουν;");
-  root.append(grid(state.gamePlayers.map(byName).map(player => {
-    const disabled = inList(state.eliminated, player) || inList(state.killers, player);
-    return playerCard(player, {
-      selected: id(player) === state.nightTarget,
-      crossed: disabled,
-      enabled: !disabled,
-      onClick: () => showNightTargetConfirm(player)
-    });
-  })));
-  root.append(actions(button("Δεν σκοτώνουν κανέναν", () => showNightTargetConfirm(null), "secondary")));
-}
-
-function showNightTargetConfirm(player) {
-  const root = screen("επιβεβαίωση νύχτας", player ? `Στόχος: ${player.name}` : "Καμία δολοφονία;");
-  root.append(cinematic(player ? `Κλείδωσε τον/την ${player.name} ως στόχο των δολοφόνων.` : "Οι δολοφόνοι περνούν τη νύχτα χωρίς στόχο."));
-  root.append(actions(
-    button(player ? "Confirm target" : "Confirm no kill", () => {
-      state.nightTarget = id(player);
-      if (!state.witch || inList(state.eliminated, byName(state.witch))) {
-        state.witchSave = null;
-        beginSeerStepForNight();
-      } else showWitchSavePick();
-    }),
-    button("Πίσω στη λίστα", showNightKillPick, "ghost")
-  ));
-}
-
-function showWitchSavePick() {
-  const root = screen("μάγισσα", "Ποιον σώζει;");
-  root.append(paragraph("Μετά την επιλογή των δολοφόνων, διάλεξε ποιον προσπάθησε να σώσει η Μάγισσα."));
-  root.append(grid(state.gamePlayers.map(byName).map(player => {
-    const disabled = inList(state.eliminated, player);
-    return playerCard(player, {
-      selected: id(player) === state.witchSave,
-      crossed: disabled,
-      enabled: !disabled,
-      onClick: () => {
-        confirmWitchSave(player);
-      }
-    });
-  })));
-  root.append(actions(button("Η Μάγισσα δεν σώζει κανέναν", () => {
-    confirmWitchSave(null);
-  }, "secondary")));
-}
-
-function confirmWitchSave(player) {
-  showConfirm({
-    kicker: "μάγισσα",
-    title: player ? `Σώζει: ${player.name}` : "Δεν σώζει κανέναν",
-    message: player ? `Επιβεβαίωσε ότι η Μάγισσα προσπάθησε να σώσει τον/την ${player.name}.` : "Επιβεβαίωσε ότι η Μάγισσα δεν σώζει κανέναν αυτή τη νύχτα.",
-    accent: "var(--lilac)",
-    confirmText: "Confirm witch action",
-    onConfirm: () => {
-      state.witchSave = id(player);
-      beginSeerStepForNight();
-    },
-    onBack: showWitchSavePick
+function updateSelectionUI(counter) {
+  counter.textContent = `${state.selected.length} / ${state.count} επιλεγμένοι`;
+  document.querySelectorAll(".player-card[data-player-id]").forEach(card => {
+    const player = roster.find(p => p.id === card.dataset.playerId);
+    const selected = state.selected.includes(player);
+    card.classList.toggle("selected", selected);
+    card.setAttribute("aria-pressed", String(selected));
+    const labelNode = card.querySelector(".label");
+    if (labelNode) labelNode.textContent = selected ? "Παίζει" : "Πάτα για επιλογή";
   });
 }
 
-function beginSeerStepForNight() {
-  if (!state.seer || inList(state.eliminated, byName(state.seer))) return showNightResolution();
-  seerReturnsToNightResolution = true;
-  showSeerGuess();
+function startGame() {
+  state.players = shuffle(state.selected).map(p => ({ ...p, alive: true, ally: null, allyUntilRound: 0 }));
+  state.eliminated = [];
+  state.log = ["Το τραπέζι άνοιξε. Όλοι ξεκινούν ζωντανοί."];
+  state.round = 1;
+  state.active = null;
+  state.turnQueue = [];
+  state.king = null;
+  state.kingUsed = false;
+  showTable();
 }
 
-function showSeerGuess() {
-  const root = screen("μάντης", "Ποιον μαντεύει;");
-  root.append(paragraph("Ο Μάντης διαλέγει έναν παίκτη. Ο Game Master βλέπει τον πραγματικό ρόλο και του τον λέει."));
-  root.append(grid(state.gamePlayers.map(byName).map(player => {
-    const disabled = inList(state.eliminated, player) || id(player) === state.seer;
-    return playerCard(player, { crossed: disabled, enabled: !disabled, onClick: () => confirmSeerGuess(player) });
+function showTable() {
+  const content = render("ΤΡΑΠΕΖΙ", `Ζωντανοί: ${alive().length}`);
+  content.append(statusBar(), grid(state.players, label, null, p => p === state.active));
+  content.append(actions(button("Γύρνα τροχό παίκτη", "", () => {
+    state.active = nextActivePlayer();
+    state.log.push(`Ο τροχός διάλεξε ${state.active.name}.`);
+    speak(`The wheel selected ${state.active.name}.`);
+    showGameMaster();
   })));
+  addLog(content, 8);
 }
 
-function confirmSeerGuess(player) {
-  showConfirm({
-    kicker: "μάντης",
-    title: `Μαντεύει: ${player.name}`,
-    message: `Επιβεβαίωσε ότι ο Μάντης θέλει να δει τον ρόλο του/της ${player.name}.`,
-    accent: "var(--lilac)",
-    confirmText: "Confirm seer guess",
-    onConfirm: () => showSeerAnswer(player),
-    onBack: showSeerGuess
+function showGameMaster() {
+  if (checkEnd()) return;
+  resolveAllianceTimers();
+  if (!state.active || !state.active.alive) state.active = nextActivePlayer();
+  const content = render("GAME MASTER", state.active.name);
+  speak(`Active player, ${state.active.name}.`);
+  content.append(statusBar(), hero(state.active));
+  if (alive().length === 2) {
+    content.append(actions(button("Τελικός Best of 2", "", showFinale)));
+    return;
+  }
+  content.append(actions(button(state.round % 5 === 0 ? "Τράβα κάρτα ΧΑΟΣ" : "Τράβα τυχαία κάρτα", "", () => showCard(randomCard()))));
+  addLog(content, 6);
+}
+
+function nextRound(pickRandom = true) {
+  if (checkEnd()) return;
+  state.round++;
+  resolveAllianceTimers();
+  if (state.round % 5 === 0) state.log.push("Έρχεται ΓΥΡΟΣ ΧΑΟΥΣ.");
+  if (pickRandom) state.active = nextActivePlayer();
+  showGameMaster();
+}
+
+function randomCard(forced) {
+  let type = forced;
+  if (!type) {
+    if (state.round % 5 === 0) type = "Χάος";
+    else {
+      const pool = alive().length <= 5
+        ? ["Μονομαχία", "Ψηφοφορία", "Καυτή Πατάτα", "Πάτα το Κουμπί", "Θυσία", "Χάος", "Mini Game"]
+        : ["Μονομαχία", "Ψηφοφορία", "Ψηφοφορία", "Δώρο", "Τροχός Τύχης", "Καυτή Πατάτα", "Πάτα το Κουμπί", "Σαμποτάζ", "Συμμαχία", "Θυσία", "Βασιλιάς", "Mini Game"];
+      type = sample(pool);
+    }
+  }
+  if (type === "Μονομαχία" || type === "Mini Game") return duelCard();
+  if (type === "Ψηφοφορία") return voteCard();
+  if (type === "Δώρο") return card("ΔΩΡΟ", "Πάσα Πρόκλησης", "Δώσε την επόμενη κάρτα σε άλλον ζωντανό παίκτη.", () => chooseTarget("Δώσε την πρόκληση", candidatesExcept(state.active), p => { forceActivePlayer(p); showCard(randomCard()); }));
+  if (type === "Τροχός Τύχης") return card("ΤΥΧΗ", "Τροχός Τύχης", "Ο τροχός διαλέγει το αποτέλεσμα.", luckWheel);
+  if (type === "Καυτή Πατάτα") return card("ΒΟΜΒΑ", "🥔 Καυτή Πατάτα", "Πέτα την πατάτα πριν τελειώσει ο χρόνος. Η έκρηξη είναι κρυφή.", () => startHotPotato(state.active));
+  if (type === "Πάτα το Κουμπί") return card("ΡΙΣΚΟ", "💣 Πάτα το Κουμπί", "Σειρά παικτών, minimum 6 πατήματα, μετά αναγκαστικά στον επόμενο.", startClickBomb);
+  if (type === "Σαμποτάζ") return card("ΣΑΜΠΟΤΑΖ", "Αναγκαστικός Επόμενος", "Διάλεξε ποιος θα πάρει την επόμενη κάρτα.", () => chooseTarget("Στόχος", candidatesExcept(state.active), p => { forceActivePlayer(p); nextRound(false); }));
+  if (type === "Συμμαχία") return card("ΣΥΜΜΑΧΙΑ", "Chained Together", "Το παιχνίδι σε δένει τυχαία με κάποιον για 4 γύρους. Αν φύγει ένας, φεύγουν και οι δύο.", bindRandomAlliance);
+  if (type === "Θυσία") return card("ΘΥΣΙΑ", "Επιλογή Θυσίας", "Φεύγεις εσύ ή βγάζεις δύο άλλους.", sacrifice);
+  if (type === "Βασιλιάς") return card("ΔΥΝΑΜΗ", "Βασιλιάς", "Μπορείς να ακυρώσεις μία αποχώρηση.", () => { state.king = state.active; state.kingUsed = false; state.log.push(`${state.active.name} έγινε Βασιλιάς.`); nextRound(true); });
+  return chaosCard();
+}
+
+function card(type, title, body, action) {
+  return { type, title, body, action };
+}
+
+function duelCard() {
+  const game = sample(["Πέτρα Ψαλίδι Χαρτί", "Τρίλιζα", "Κορώνα Γράμματα", "Tap Battle", "Μνήμη", "5 Ερωτήσεις"]);
+  return card("ΜΟΝΟΜΑΧΙΑ", game, "Διάλεξε αντίπαλο. Το mini game παίζεται μέσα στην εφαρμογή.", () => chooseTarget("Αντίπαλος", candidatesExcept(state.active), p => startMini(game, state.active, p)));
+}
+
+function voteCard() {
+  const r = Math.floor(Math.random() * 3);
+  if (r === 0) return card("ΨΗΦΟΦΟΡΙΑ", "Υποψήφιος Εναντίον Σου", "Διάλεξε έναν παίκτη να είναι υποψήφιος απέναντί σου. Οι υποψήφιοι δεν ψηφίζουν.", () => chooseTarget("Υποψήφιος εναντίον σου", candidatesExcept(state.active), p => vote([state.active, p], 1, true)));
+  if (r === 1) return card("ΨΗΦΟΦΟΡΙΑ", "Δύο Υποψήφιοι", "Διάλεξε δύο παίκτες. Οι υποψήφιοι δεν ψηφίζουν.", () => chooseTarget("Πρώτος υποψήφιος", alive(), a => chooseTarget("Δεύτερος υποψήφιος", alive().filter(p => p !== a), b => vote([a, b], 1, true))));
+  return card("ΨΗΦΟΦΟΡΙΑ", "Σώσε Έναν", "Ξεκινάς σώζοντας έναν άλλον παίκτη. Μετά ο σωσμένος σώζει άλλον, μέχρι να μείνουν 2 που δεν σώθηκαν.", startSaveChain);
+}
+
+function chaosCard() {
+  const event = sample(["Διπλή αποχώρηση", "Ψηφίζουν όλοι", "Τυχαία μονομαχία", "Ρουλέτα", "Καυτή Πατάτα", "Πάτα το Κουμπί"]);
+  return card("ΧΑΟΣ", event, "Όλοι κινδυνεύουν.", () => {
+    if (event === "Διπλή αποχώρηση") chooseTwoOut("Διπλή αποχώρηση");
+    else if (event === "Ψηφίζουν όλοι") vote(alive(), 1, false);
+    else if (event === "Τυχαία μονομαχία") { const a = sample(alive()); startMini("Τυχαία μονομαχία", a, sample(candidatesExcept(a))); }
+    else if (event === "Ρουλέτα") rouletteElimination();
+    else if (event === "Καυτή Πατάτα") startHotPotato(sample(alive()));
+    else startClickBomb();
   });
 }
 
-function showSeerAnswer(player) {
-  const role = revealRole(player);
-  const root = screen("απάντηση μάντη", role);
-  root.append(h("div", { className: "cinematic", text: `${player.name} έχει ρόλο: ${role}.` }));
-  state.log.push(`Μάντης: ρώτησε για ${player.name} -> ${role}`);
-  root.append(actions(button(seerReturnsToNightResolution ? "Ανακοίνωση νύχτας" : "Πίσω στο κέντρο ελέγχου", () => {
-    if (seerReturnsToNightResolution) {
-      seerReturnsToNightResolution = false;
-      showNightResolution();
-    } else showDashboard();
-  })));
+function englishCardSpeech(c) {
+  const text = `${c.type} ${c.title}`;
+  const typeMap = [
+    ["ΜΟΝΟΜΑΧΙΑ", "Duel"],
+    ["ΨΗΦΟΦΟΡΙΑ", "Voting"],
+    ["ΔΩΡΟ", "Gift"],
+    ["ΤΥΧΗ", "Luck"],
+    ["ΒΟΜΒΑ", "Hot Potato"],
+    ["ΡΙΣΚΟ", "Press the Button"],
+    ["ΣΑΜΠΟΤΑΖ", "Sabotage"],
+    ["ΣΥΜΜΑΧΙΑ", "Bound Fate"],
+    ["ΘΥΣΙΑ", "Sacrifice"],
+    ["ΔΥΝΑΜΗ", "Power"],
+    ["ΧΑΟΣ", "Chaos"]
+  ];
+  const titleMap = [
+    ["Πέτρα Ψαλίδι Χαρτί", "Rock Paper Scissors"],
+    ["Τρίλιζα", "Tic Tac Toe"],
+    ["Κορώνα Γράμματα", "Coin Flip"],
+    ["Μνήμη", "Memory"],
+    ["Ερωτήσεις", "Questions"],
+    ["Υποψήφιος Εναντίον Σου", "Nominate someone against you"],
+    ["Δύο Υποψήφιοι", "Two nominees"],
+    ["Σώσε Έναν", "Save one"],
+    ["Πάσα Πρόκλησης", "Pass the challenge"],
+    ["Τροχός Τύχης", "Wheel of luck"],
+    ["Καυτή Πατάτα", "Hot Potato"],
+    ["Πάτα το Κουμπί", "Press the Button"],
+    ["Αναγκαστικός Επόμενος", "Forced next player"],
+    ["Δεμένη Μοίρα", "Bound fate"],
+    ["Επιλογή Θυσίας", "Sacrifice choice"],
+    ["Βασιλιάς", "King"],
+    ["Διπλή αποχώρηση", "Double elimination"],
+    ["Ψηφίζουν όλοι", "Everybody votes"],
+    ["Τυχαία μονομαχία", "Random duel"],
+    ["Ρουλέτα", "Roulette"]
+  ];
+  const type = typeMap.find(([key]) => text.includes(key))?.[1] || "Card";
+  const title = titleMap.find(([key]) => text.includes(key))?.[1] || c.title.replace(/[^\x00-\x7F]+/g, "").trim();
+  return title ? `${type}. ${title}.` : `${type}.`;
 }
 
-function showNightResolution() {
-  const root = screen("ανακοίνωση νύχτας", "Τι συνέβη;");
-  if (!state.nightTarget) {
-    root.append(paragraph("Οι δολοφόνοι δεν σκότωσαν κανέναν αυτή τη νύχτα."));
-    state.log.push(`Νύχτα ${state.round}: οι δολοφόνοι δεν σκότωσαν κανέναν.`);
-    root.append(actions(button("Συνέχεια ημέρας", showDashboard)));
+function showCard(c) {
+  const content = render(c.type, c.title);
+  speak(englishCardSpeech(c));
+  content.append(statusBar(), hero(state.active), el("div", "card-panel", `<div class="type">${c.type}</div><h2>${c.title}</h2><p>${c.body}</p>`));
+  content.append(actions(button("Ξεκίνα", "", c.action), button("Άλλη κάρτα", "secondary", () => showCard(randomCard())), button("Καμία αποχώρηση", "ghost", () => nextRound(true))));
+}
+
+function chooseTarget(title, options, action) {
+  const content = render("ΔΙΑΛΕΞΕ", title);
+  content.append(grid(options, "Διάλεξε", action));
+}
+
+function vote(options, outCount = 1, excludeOptions = true) {
+  const votes = new Map();
+  const voters = excludeOptions ? alive().filter(p => !options.includes(p)) : alive();
+  voteStep(options, votes, outCount, voters, 0, excludeOptions);
+}
+
+function voteStep(options, votes, outCount, voters, index, excludeOptions) {
+  const content = render("ΨΗΦΟΦΟΡΙΑ", `Ψήφος ${Math.min(index + 1, voters.length)} / ${voters.length}`);
+  content.append(scoreboard(options, votes));
+  if (index >= voters.length) {
+    content.append(paragraph(excludeOptions ? "Η ψηφοφορία κλείδωσε. Οι υποψήφιοι δεν ψήφισαν." : "Η ψηφοφορία κλείδωσε. Όλοι ψήφισαν μία φορά."));
+    content.append(actions(button("Λύσε ψηφοφορία", "", () => resolveVote(options, votes, outCount))));
     return;
   }
-  const target = byName(state.nightTarget);
-  const saved = state.nightTarget === state.witchSave;
-  const message = saved
-    ? `Η Μάγισσα προσπάθησε να σώσει τον/την ${roleName(byName(state.witchSave))}. Κανείς δεν πέθανε.`
-    : `Η Μάγισσα προσπάθησε να σώσει ${roleName(byName(state.witchSave))}. Ο/Η ${target.name} δολοφονήθηκε. Ρόλος: ${revealRole(target)}.`;
-  root.append(cinematic(message, saved ? "var(--mint)" : "var(--danger)"));
-  speak(saved ? `The witch saved ${byName(state.witchSave).name}` : `${target.name} was murdered. ${target.name} was ${spokenRole(target)}`);
-  if (!saved) eliminate(target, "murdered", revealRole(target));
-  state.log.push(`Νύχτα ${state.round}: ${message}`);
-  root.append(actions(button("Συνέχεια ημέρας", showDashboard)));
+  const voter = voters[index];
+  content.append(hero(voter), paragraph(`Δώσε το κινητό στον/στην ${voter.name}.`));
+  const choices = excludeOptions ? options : options.filter(p => p !== voter);
+  content.append(grid(choices, "Ψήφος", p => {
+    votes.set(p, (votes.get(p) || 0) + 1);
+    voteStep(options, votes, outCount, voters, index + 1, excludeOptions);
+  }));
 }
 
-function startDayVoting() {
-  state.tally = {};
-  state.blankVotes = 0;
-  state.votingIndex = 0;
-  showVotingTurn();
+function startSaveChain() {
+  saveChain(state.active, []);
 }
 
-function showVotingTurn() {
-  const voters = livingPlayers();
-  if (state.votingIndex >= voters.length) return showVotingResult();
-  const voter = voters[state.votingIndex];
-  speak(`Now voting ${voter.name}`);
-  const root = screen("ψηφοφορία ημέρας", `Ψηφίζει: ${voter.name}`);
-  root.append(voteProgressPanel(state.votingIndex, voters.length), votingSpotlight(voter, state.votingIndex + 1, voters.length));
-  root.append(grid(state.gamePlayers.map(byName).map(candidate => {
-    const disabled = inList(state.eliminated, candidate) || id(candidate) === id(voter);
-    return playerCard(candidate, { crossed: disabled, enabled: !disabled, onClick: () => showVoteConfirm(voter, candidate) });
-  })));
-  root.append(actions(
-    button("🎙 Πες όνομα", () => startVoteRecognition(voter), "secondary"),
-    button("Λευκή ψήφος", () => showVoteConfirm(voter, null), "secondary")
-  ));
-}
-
-function startVoteRecognition(voter) {
-  const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-  if (!Recognition) {
-    toast("Η αναγνώριση φωνής δεν υποστηρίζεται σε αυτή τη συσκευή/browser.");
+function saveChain(picker, saved) {
+  const unsaved = alive().filter(p => !saved.includes(p));
+  if (unsaved.length <= 2) {
+    const content = render("ΣΩΣΕ ΕΝΑΝ", "Τελική ψηφοφορία");
+    content.append(paragraph("Αυτοί οι δύο δεν σώθηκαν. Οι υπόλοιποι ψηφίζουν ποιος φεύγει."));
+    content.append(grid(unsaved, "Υποψήφιος", null));
+    content.append(actions(button("Ξεκίνα ψηφοφορία", "", () => vote(unsaved, 1, true))));
     return;
   }
-  const recognition = new Recognition();
-  recognition.lang = "en-US";
-  recognition.interimResults = false;
-  recognition.maxAlternatives = 4;
-  toast("Άκουω... πες το όνομα του παίκτη.");
-  recognition.onresult = event => {
-    const heard = Array.from(event.results[0])
-      .map(result => result.transcript)
-      .join(" ");
-    const candidate = matchVoteSpeech(heard, voter);
-    if (candidate === "blank") {
-      showVoteConfirm(voter, null);
-    } else if (candidate) {
-      showVoteConfirm(voter, candidate);
-    } else {
-      toast(`Δεν βρήκα παίκτη από: ${heard}`);
-    }
-  };
-  recognition.onerror = event => {
-    toast(event.error === "not-allowed" ? "Δώσε άδεια μικροφώνου στο Safari/Browser." : "Δεν άκουσα καθαρά. Δοκίμασε ξανά.");
-  };
-  recognition.start();
-}
 
-function matchVoteSpeech(heard, voter) {
-  const value = normalizeSpeech(heard);
-  if (!value) return null;
-  if (["blank", "white", "lefki", "leuki", "lefko", "λευκη", "λευκο"].some(word => value.includes(word))) {
-    return "blank";
+  const choices = unsaved.filter(p => p !== picker);
+  const content = render("ΣΩΣΕ ΕΝΑΝ", `${picker.name} σώζει`);
+  content.append(hero(picker));
+  content.append(paragraph(`${picker.name}, διάλεξε έναν παίκτη να σώσεις. Δεν μπορείς να σώσεις τον εαυτό σου.`));
+  if (saved.length) {
+    const savedPanel = el("div", "scoreboard save-chain");
+    savedPanel.append(el("div", "type", "ΣΩΘΗΚΑΝ"));
+    saved.forEach((p, index) => savedPanel.append(el("div", "score-row", `<span>${index + 1}. ${p.name}</span><span>Safe</span>`)));
+    content.append(savedPanel);
   }
-  const candidates = livingPlayers().filter(player => player.name !== voter.name);
-  let best = null;
-  for (const player of candidates) {
-    const aliases = speechAliases(player.name);
-    if (aliases.some(alias => value.includes(normalizeSpeech(alias)))) {
-      best = player;
-      break;
-    }
+  content.append(grid(choices, "Σώσε", target => {
+    saved.push(target);
+    state.log.push(`${picker.name} έσωσε ${target.name}.`);
+    saveChain(target, saved);
+  }));
+}
+
+function scoreboard(options, votes) {
+  const box = el("div", "scoreboard");
+  options.forEach(p => box.append(el("div", "score-row", `<span>${p.name}</span><span>${votes.get(p) || 0} ψήφοι</span>`)));
+  return box;
+}
+
+function resolveVote(options, votes, outCount) {
+  const sorted = [...options].sort((a, b) => (votes.get(b) || 0) - (votes.get(a) || 0));
+  if (outCount > 1) return confirmDoubleOut(sorted[0], sorted[1], "Διπλή ψηφοφορία");
+  const high = votes.get(sorted[0]) || 0;
+  const tied = sorted.filter(p => (votes.get(p) || 0) === high);
+  if (tied.length > 1) return resolveVoteTie(tied);
+  confirmOut(sorted[0], "Ψηφοφορία");
+}
+
+function resolveVoteTie(tied) {
+  if (state.king && state.king.alive && !state.kingUsed) {
+    const content = render("ΙΣΟΨΗΦΙΑ", "Αποφασίζει ο Βασιλιάς");
+    content.append(hero(state.king), grid(tied, "Φεύγει", p => { state.kingUsed = true; confirmOut(p, "Ισοψηφία - απόφαση Βασιλιά"); }));
+    return;
   }
-  return best;
+  const content = render("ΙΣΟΨΗΦΙΑ", "Πέτρα Ψαλίδι Χαρτί");
+  content.append(paragraph(`${tied.length} ισόψηφοι παίζουν όλοι κρυφά. Ο χαμένος φεύγει.`));
+  content.append(actions(button(`Παίζουν ${tied.length} παίκτες`, "", () => multiRpsTie(tied, 0, new Map()))));
 }
 
-function speechAliases(name) {
-  const map = {
-    Alex: ["Alex", "Αλεξ"],
-    Billy: ["Billy", "Billie", "Μπιλυ"],
-    Catherine: ["Catherine", "Katherine", "Κατεριν"],
-    Demarin: ["Demarin", "Deh mareen", "Demarine", "Ντεμαριν"],
-    Elisa: ["Elisa", "Elisa Lanchava", "Lanchava", "Ελισα"],
-    Eva: ["Eva", "Εβα"],
-    Evaggelia: ["Evaggelia", "Evangelia", "Ευαγγελια"],
-    Evelyn: ["Evelyn", "Εβελυν"],
-    Hope: ["Hope"],
-    Jasmine: ["Jasmine", "Jasmin"],
-    Luna: ["Luna", "Λουνα"],
-    Pauline: ["Pauline", "Polin"],
-    Phillip: ["Phillip", "Philip"],
-    Rino: ["Rino", "Reeno", "Ρινο"],
-    Sargenie: ["Sargenie", "Sarjeenee", "Sargini", "Σαρτζινι"],
-    Smaragda: ["Smaragda", "Σμαραγδα"],
-    Sorina: ["Sorina", "Soreena", "Σορινα"],
-    Tony: ["Tony", "Toni"],
-    Vicky: ["Vicky", "Vicki", "Βικυ"],
-    Violet: ["Violet", "Βιολετ"],
-    Zoe: ["Zoe", "Zoey", "Ζωη"],
-    Irene: ["Irene", "Eirini", "Irini", "Ειρηνη"]
-  };
-  return map[name] || [name];
+function multiRpsTie(players, index, picks) {
+  if (players.length === 1) return confirmOut(players[0], "Ισοψηφία - Πέτρα Ψαλίδι Χαρτί");
+  if (index >= players.length) return resolveMultiRpsTie(players, picks);
+  const picker = players[index];
+  const content = render("ΙΣΟΨΗΦΙΑ RPS", picker.name);
+  content.append(paragraph(`Δώσε το κινητό στον/στην ${picker.name}. Διάλεξε κρυφά.`));
+  content.append(rpsChoices(move => {
+    picks.set(picker, move);
+    multiRpsTie(players, index + 1, picks);
+  }));
 }
 
-function normalizeSpeech(value) {
-  return (value || "")
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^\p{L}\p{N}\s]/gu, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function voteProgressPanel(voted, total) {
-  const board = voteBoardText();
-  return h("section", { className: "panel vote-board" }, [
-    h("div", { className: "stats", text: `Έχουν ψηφίσει ${voted} / ${total}` }),
-    h("div", { className: "score", text: board || "Δεν υπάρχει ακόμα ψήφος." })
-  ]);
-}
-
-function voteBoardText() {
-  const rows = Object.entries(state.tally).sort(([a], [b]) => a.localeCompare(b)).map(([name, votes]) => `${name} (${votes})`);
-  if (state.blankVotes > 0) rows.push(`Λευκή (${state.blankVotes})`);
-  return rows.join("   ");
-}
-
-function votingSpotlight(voter, current, total) {
-  return h("section", { className: "spotlight" }, [
-    h("div", { className: "step", text: `ΨΗΦΟΦΟΡΙΑ ${current} / ${total}` }),
-    h("img", { src: imgPath(voter), alt: voter.name }),
-    h("div", { className: "who", text: `Τώρα ψηφίζει: ${voter.name}` }),
-    paragraph("Ο Game Master πατάει ποιον/ποια ψήφισε.", "center")
-  ]);
-}
-
-function showVoteConfirm(voter, candidate) {
-  const root = screen("confirm vote", candidate ? `${voter.name} votes ${candidate.name}` : `${voter.name} votes blank`);
-  root.append(votingSpotlight(voter, state.votingIndex + 1, livingPlayers().length));
-  root.append(cinematic(candidate ? `Επιβεβαίωσε ότι ο/η ${voter.name} ψηφίζει ${candidate.name}.` : `Επιβεβαίωσε ότι ο/η ${voter.name} ρίχνει λευκή ψήφο.`, candidate ? "var(--pink)" : "var(--lilac)"));
-  root.append(actions(
-    button("Confirm vote", () => {
-      const finalVote = state.votingIndex >= livingPlayers().length - 1;
-      if (candidate) {
-        state.tally[candidate.name] = (state.tally[candidate.name] || 0) + 1;
-        state.log.push(`${voter.name} ψήφισε ${candidate.name}`);
-        if (!finalVote) speak(`${voter.name} voted ${candidate.name}`);
-      } else {
-        state.blankVotes += 1;
-        state.log.push(`${voter.name} έριξε λευκή ψήφο.`);
-        if (!finalVote) speak(`${voter.name} voted blank`);
-      }
-      state.votingIndex += 1;
-      showVotingTurn();
-    }),
-    button("Αλλαγή επιλογής", showVotingTurn, "ghost")
-  ));
-}
-
-function topVotedPlayers() {
-  let max = 0;
-  const top = [];
-  for (const [name, votes] of Object.entries(state.tally)) {
-    if (votes > max) {
-      max = votes;
-      top.length = 0;
-      top.push(byName(name));
-    } else if (votes === max) top.push(byName(name));
+function resolveMultiRpsTie(players, picks) {
+  const content = render("ΑΠΟΤΕΛΕΣΜΑ RPS", "Ισοψηφία");
+  players.forEach(p => content.append(paragraph(`${p.name}: ${picks.get(p)}`)));
+  const moves = [...new Set(players.map(p => picks.get(p)))];
+  if (moves.length !== 2) {
+    content.append(paragraph("Δεν βγήκε καθαρός χαμένος. Ξανά όλοι."));
+    content.append(actions(button("Ξανά", "", () => multiRpsTie(players, 0, new Map()))));
+    return;
   }
-  return top.filter(Boolean);
-}
-
-function blankVoteWins(top, topVotes) {
-  if (state.blankVotes > topVotes) return true;
-  return state.blankVotes === topVotes && top.length === 1;
-}
-
-function showVotingResult() {
-  const root = screen("αποτέλεσμα ψηφοφορίας", "Οι ψήφοι μίλησαν");
-  const top = topVotedPlayers();
-  if (!top.length) return noOneLeaves(root, "Όλοι έριξαν λευκή ψήφο. Δεν αποχωρεί κανείς.", "Μόνο λευκές ψήφοι: δεν αποχώρησε κανείς.");
-  const votes = state.tally[top[0].name];
-  root.append(paragraph(`Περισσότερες ψήφοι: ${names(top)} (${votes})`));
-  if (blankVoteWins(top, votes)) return noOneLeaves(root, "Η λευκή ψήφος βγήκε πρώτη ή ισοψήφησε με έναν παίκτη. Δεν αποχωρεί κανείς.", "Λευκή ψήφος: δεν αποχώρησε κανείς.");
-  if (top.length === 1) {
-    root.append(actions(button(`Αποχωρεί: ${top[0].name}`, () => voteOut(top[0]))));
-  } else {
-    root.append(paragraph("Υπάρχει ισοψηφία. Αν ο Βασιλιάς θέλει, αποκαλύπτει τον ρόλο του και διαλέγει ποιος θα φύγει. Αλλιώς δεν αποχωρεί κανείς."));
-    const buttons = [];
-    if (state.king && !inList(state.eliminated, byName(state.king))) buttons.push(button("Ο Βασιλιάς αποφασίζει", () => showKingTieBreak(top)));
-    buttons.push(button("Δεν αποχωρεί κανείς", () => {
-      state.log.push("Ισοψηφία: δεν αποχώρησε κανείς.");
-      state.round += 1;
-      showDashboard();
-    }, "secondary"));
-    root.append(actions(...buttons));
+  const losingMove = losingRpsMove(moves[0], moves[1]);
+  const losers = players.filter(p => picks.get(p) === losingMove);
+  if (losers.length === 1) {
+    content.append(actions(button(`${losers[0].name} φεύγει`, "", () => confirmOut(losers[0], "Ισοψηφία - Πέτρα Ψαλίδι Χαρτί"))));
+    return;
   }
+  content.append(paragraph("Οι χαμένοι παίζουν ξανά μεταξύ τους μέχρι να μείνει ένας."));
+  content.append(actions(button("Συνέχεια", "", () => multiRpsTie(losers, 0, new Map()))));
 }
 
-function noOneLeaves(root, message, logEntry) {
-  root.append(paragraph(message));
-  root.append(actions(button("Συνέχεια", () => {
-    state.log.push(logEntry);
-    state.round += 1;
-    showDashboard();
-  })));
+function losingRpsMove(a, b) {
+  const aWins = (a === "Πέτρα" && b === "Ψαλίδι") || (a === "Ψαλίδι" && b === "Χαρτί") || (a === "Χαρτί" && b === "Πέτρα");
+  return aWins ? b : a;
 }
 
-function showKingTieBreak(tiedPlayers) {
-  const root = screen("βασιλιάς", "Ποιος φεύγει;");
-  playSound("isopalia");
-  root.append(paragraph("Ο Βασιλιάς αποκαλύπτει τον ρόλο του και διαλέγει έναν από τους ισόψηφους."));
-  root.append(grid(tiedPlayers.map(player => playerCard(player, {
-    onClick: () => showConfirm({
-      kicker: "βασιλιάς",
-      title: `Φεύγει: ${player.name}`,
-      message: `Επιβεβαίωσε ότι ο Βασιλιάς διαλέγει να αποχωρήσει ο/η ${player.name}.`,
-      confirmText: "Confirm king choice",
-      onConfirm: () => voteOut(player),
-      onBack: () => showKingTieBreak(tiedPlayers)
-    })
-  }))));
-}
-
-function voteOut(player) {
-  const reveal = revealRole(player);
-  const spoken = spokenRole(player);
-  eliminate(player, "voted", reveal);
-  state.log.push(`${player.name} αποχώρησε από ψηφοφορία. Ρόλος: ${reveal}.`);
-  speak(`${player.name} was voted out. ${player.name} was ${spoken}`);
-  if (state.round === 1 && inList(state.killers, player)) return showFirstRoundReplacement(player);
-  if (inList(state.killers, player) && !livingKillers().length) return showGameOver("Τα Spirits κέρδισαν. Όλοι οι δολοφόνοι βρέθηκαν.", true);
-  if (killersHaveWon()) return showGameOver(killerWinMessage(), false);
-  state.round += 1;
-  showDashboard();
-}
-
-function showFirstRoundReplacement(fallenKiller) {
-  if (fallenKiller) state.pendingFirstRoundFallenKiller = fallenKiller.name;
-  const candidates = livingNonKillers();
-  if (!candidates.length) return showGameOver("Τα Spirits κέρδισαν. Όλοι οι δολοφόνοι βρέθηκαν.", true);
-  removeFrom(state.killers, byName(state.pendingFirstRoundFallenKiller));
-  const root = screen("ανατροπή πρώτου γύρου", "Οι δολοφόνοι επιλέγουν διάδοχο");
-  root.classList.add("twist-screen");
-  playSound("isopalia");
-  root.append(cinematic(`Ο/Η ${state.pendingFirstRoundFallenKiller || "δολοφόνος"} βγήκε στον πρώτο γύρο. Οι δολοφόνοι μπορούν να μετατρέψουν έναν ζωντανό παίκτη σε νέο δολοφόνο. Η επιλογή θα χρειαστεί επιβεβαίωση.`, "var(--danger)"));
-  root.append(grid(candidates.map(player => playerCard(player, { onClick: () => confirmFirstRoundReplacement(player) }))));
-}
-
-function confirmFirstRoundReplacement(replacement) {
-  const root = screen("νέος δολοφόνος", replacement.name);
-  root.classList.add("twist-screen");
-  playSound("isopalia");
-  root.append(cinematic(`Τελική επιβεβαίωση: ο/η ${replacement.name} θα γίνει νέος δολοφόνος. Αν είχε ειδικό ρόλο, ο ρόλος θα μεταφερθεί σε άλλο Spirit.`, "var(--danger)"));
-  root.append(actions(
-    button("Confirm new murderer", () => {
-      const movedRole = reassignSpecialRoleIfNeeded(replacement);
-      addTo(state.killers, replacement);
-      state.log.push(`${replacement.name} έγινε νέος δολοφόνος στον πρώτο γύρο.${movedRole ? " " + movedRole : ""}`);
-      state.pendingFirstRoundFallenKiller = null;
-      state.round += 1;
-      showDashboard();
-    }),
-    button("Πίσω στη λίστα", () => showFirstRoundReplacement(byName(state.pendingFirstRoundFallenKiller)), "ghost")
-  ));
-}
-
-function reassignSpecialRoleIfNeeded(replacement) {
-  if (![state.seer, state.witch, state.king].includes(replacement.name)) return "";
-  const pool = livingPlayers().filter(player => player.name !== replacement.name && !inList(state.killers, player) && ![state.seer, state.witch, state.king].includes(player.name));
-  if (!pool.length) {
-    clearSpecialRole(replacement);
-    return "Δεν βρέθηκε διαθέσιμο Spirit για μεταφορά ειδικού ρόλου. Ο ειδικός ρόλος χάθηκε.";
+function confirmOut(victim, reason) {
+  if (!victim || !victim.alive) return nextRound(true);
+  if (victim.ally && victim.ally.alive && alive().length > 3) return confirmDoubleOut(victim, victim.ally, `${reason} - Δεμένη Μοίρα`);
+  const content = render("ΑΠΟΧΩΡΗΣΗ", victim.name);
+  content.append(hero(victim), paragraph(reason));
+  if (state.king && state.king.alive && !state.kingUsed) {
+    content.append(actions(button(`Ο Βασιλιάς ${state.king.name} ακυρώνει`, "secondary", () => { state.kingUsed = true; state.log.push(`Ο Βασιλιάς ακύρωσε την αποχώρηση του/της ${victim.name}.`); nextRound(true); })));
   }
-  const newHolder = shuffle(pool)[0];
-  let role;
-  if (state.seer === replacement.name) {
-    state.seer = newHolder.name;
-    role = "Μάντης";
-  } else if (state.witch === replacement.name) {
-    state.witch = newHolder.name;
-    role = "Μάγισσα";
-  } else {
-    state.king = newHolder.name;
-    role = "Βασιλιάς";
-  }
-  return `Ο ρόλος ${role} μεταφέρθηκε στον/στην ${newHolder.name}.`;
+  content.append(actions(button(`Βγάλε ${victim.name}`, "", () => { eliminateNow(victim, reason); nextRound(true); })));
 }
 
-function showManualElimination() {
-  const root = screen("χειροκίνητη αποχώρηση", "Ποιος βγαίνει;");
-  root.append(grid(state.gamePlayers.map(byName).map(player => {
-    const disabled = inList(state.eliminated, player);
-    return playerCard(player, {
-      crossed: disabled,
-      enabled: !disabled,
-      label: roleLabel(player),
-      onClick: () => {
-        showConfirm({
-          kicker: "χειροκίνητη αποχώρηση",
-          title: `Βγαίνει: ${player.name}`,
-          message: `Επιβεβαίωσε ότι ο/η ${player.name} βγαίνει χειροκίνητα από το παιχνίδι.`,
-          confirmText: "Confirm out",
-          onConfirm: () => {
-            const reveal = revealRole(player);
-            const spoken = spokenRole(player);
-            eliminate(player, "manual", reveal);
-            state.log.push(`${player.name} αφαιρέθηκε χειροκίνητα. Ρόλος: ${reveal}.`);
-            speak(`${player.name} was out. ${player.name} was ${spoken}`);
-            showDashboard();
-          },
-          onBack: showManualElimination
-        });
-      }
-    });
-  })));
+function chooseTwoOut(reason) {
+  chooseTarget("Πρώτο θύμα", alive(), a => chooseTarget("Δεύτερο θύμα", alive().filter(p => p !== a), b => confirmDoubleOut(a, b, reason)));
 }
 
-function checkGameOver() {
-  if (!state.killers.length || !state.gamePlayers.length) return false;
-  if (!livingKillers().length) {
-    showGameOver("Τα Spirits κέρδισαν. Όλοι οι δολοφόνοι βρέθηκαν.", true);
-    return true;
+function confirmDoubleOut(a, b, reason) {
+  const content = render("ΔΙΠΛΗ ΑΠΟΧΩΡΗΣΗ", `${a.name} & ${b.name}`);
+  content.append(hero(a), hero(b), paragraph(reason));
+  if (state.king && state.king.alive && !state.kingUsed) {
+    content.append(actions(button(`Ο Βασιλιάς ${state.king.name} ακυρώνει`, "secondary", () => { state.kingUsed = true; nextRound(true); })));
   }
-  if (killersHaveWon()) {
-    showGameOver(killerWinMessage(), false);
-    return true;
+  content.append(actions(button("Βγάλε και τους δύο", "", () => { eliminateNow(a, reason); eliminateNow(b, reason); nextRound(true); })));
+}
+
+function eliminateNow(victim, reason) {
+  if (!victim || !victim.alive) return;
+  victim.alive = false;
+  removeFromTurnQueue(victim);
+  state.eliminated.push(victim);
+  state.log.push(`${victim.name} έφυγε. Αιτία: ${reason}.`);
+  speak(`${victim.name} eliminated.`);
+  if (victim.ally && victim.ally.alive) {
+    const ally = victim.ally;
+    ally.alive = false;
+    removeFromTurnQueue(ally);
+    state.eliminated.push(ally);
+    state.log.push(`${ally.name} έφυγε επίσης λόγω Δεμένης Μοίρας.`);
+    speak(`${ally.name} eliminated.`);
+    breakAlliance(victim, "");
   }
+  if (state.king === victim) { state.king = null; state.kingUsed = false; }
+}
+
+function checkEnd() {
+  if (alive().length <= 1) { showWinner(); return true; }
   return false;
 }
 
-function killersHaveWon() {
-  if (!livingKillers().length) return false;
-  if (!livingNonKillers().length) return true;
-  const finalThreshold = state.killerCount === 1 ? 2 : 3;
-  return livingPlayers().length <= finalThreshold;
-}
-
-function killerWinMessage() {
-  if (!livingNonKillers().length) return "Οι δολοφόνοι κέρδισαν. Δεν έμεινε κανένα Spirit ζωντανό.";
-  if (livingKillers().length === 1) return `${livingKillers()[0].name} κέρδισε ατομικά ως τελευταίος δολοφόνος.`;
-  return `Οι δολοφόνοι κέρδισαν μαζί: ${names(livingKillers())}.`;
-}
-
-function showGameOver(message, spiritsWin) {
-  state.lastSpiritsWin = spiritsWin;
-  state.lastVictorySound = spiritsWin ? "spirits" : (livingKillers().length === 1 && livingPlayers().length <= 3 ? "oneVillain" : "manyVillains");
-  const root = screen("τέλος παιχνιδιού", "Game Over");
-  root.append(cinematic(message, spiritsWin ? "var(--mint)" : "var(--danger)"), winnerPanel(spiritsWin));
-  playSound(state.lastVictorySound);
-  speak(spiritsWin ? "The spirits win" : "The murderers win");
-  addHistory(root);
-  root.append(actions(button("Δες κατάταξη", showPlacementLoading)));
-}
-
-function winnerPanel(spiritsWin) {
-  const winners = spiritsWin ? livingNonKillers() : livingKillers();
-  return h("section", { className: "winner-panel" }, [
-    h("div", { className: "label", text: spiritsWin ? "SPIRITS VICTORY" : "MURDERER VICTORY" }),
-    grid(winners.map(player => playerCard(player, { selected: true, enabled: false, label: spiritsWin ? "Spirit" : "Winner" })))
-  ]);
-}
-
-function showPlacementLoading() {
-  stopSound();
-  const root = screen("τελική αναφορά", "Φόρτωση κατάταξης");
-  root.append(h("section", { className: "loading-panel" }, [
-    h("div", { className: "knife-loader" }),
-    h("div", { className: "scanner" }),
-    h("div", { className: "loading-title", text: "Murder board loading..." }),
-    paragraph("Το Spirits ανοίγει τους φακέλους αποχώρησης.", "center")
-  ]));
-  setTimeout(showPlacements, 950);
-}
-
-function showPlacements() {
-  const winnerGroup = state.lastSpiritsWin ? livingNonKillers() : livingKillers();
-  const finalPlayers = [
-    ...winnerGroup,
-    ...livingPlayers().filter(player => !winnerGroup.some(winner => winner.name === player.name))
-  ];
-  const eliminated = state.placements
-    .slice()
-    .reverse()
-    .filter(entry => !finalPlayers.some(player => player.name === entry.name));
-  const root = screen("placements", "Τελική κατάταξη");
-  root.append(h("div", { className: "placement-subtitle", text: "Spirits: Final Files" }));
-  playSound(state.lastVictorySound || "spirits");
-
-  const board = h("section", { className: "placements-board" });
-  finalPlayers.forEach((player, index) => {
-    const isWinner = winnerGroup.some(winner => winner.name === player.name);
-    board.append(placementCard({
-      player,
-      place: isWinner ? "Winner" : `${index + 1}η θέση`,
-      role: revealRole(player),
-      reason: "Finalist"
-    }, isWinner));
-  });
-  eliminated.forEach((entry, index) => {
-    board.append(placementCard({
-      player: byName(entry.name),
-      place: `${finalPlayers.length + index + 1}η θέση`,
-      role: entry.role,
-      reason: placementReason(entry.reason)
-    }));
-  });
-  root.append(board);
-
-  const gm = byName(state.gameMaster);
-  if (gm) {
-    root.append(h("section", { className: "gm-box" }, [
-      h("div", { className: "label", text: "GAME MASTER - εκτός κατάταξης" }),
-      placementCard({
-        player: gm,
-        place: "Game Master",
-        role: "Δεν υπολογίζεται",
-        reason: "Πρώτος νεκρός"
-      })
-    ]));
+function bindRandomAlliance() {
+  if (alive().length <= 3) {
+    const content = render("ΔΕΜΕΝΗ ΜΟΙΡΑ", "Δεν ενεργοποιείται");
+    content.append(paragraph("Στην τελική τριάδα οι αλυσίδες σπάνε αυτόματα."));
+    content.append(actions(button("Συνέχεια", "", () => nextRound(true))));
+    return;
   }
-
-  root.append(actions(button("Νέο παιχνίδι", showIntro)));
+  const partner = sample(candidatesExcept(state.active));
+  state.active.ally = partner;
+  partner.ally = state.active;
+  state.active.allyUntilRound = state.round + 4;
+  partner.allyUntilRound = state.round + 4;
+  const content = render("ΔΕΜΕΝΗ ΜΟΙΡΑ", `${state.active.name} & ${partner.name}`);
+  content.append(hero(state.active), hero(partner), paragraph("Αν ένας αποχωρήσει πριν περάσουν 4 γύροι, αποχωρεί και ο άλλος."));
+  content.append(actions(button("Συνέχεια", "", () => nextRound(true))));
 }
 
-function placementCard(entry, winner = false) {
-  if (!entry.player) return h("div");
-  return h("article", { className: `placement-card ${winner ? "winner" : ""}` }, [
-    h("img", { src: imgPath(entry.player), alt: entry.player.name }),
-    h("div", { className: "placement-name", text: entry.player.name }),
-    h("div", { className: "placement-place", text: entry.place }),
-    h("div", { className: "placement-meta", text: entry.role }),
-    h("div", { className: "placement-meta", text: entry.reason })
-  ]);
+function resolveAllianceTimers() {
+  if (alive().length <= 3) {
+    state.players.forEach(p => p.ally && breakAlliance(p, "Η τελική τριάδα έσπασε τη Δεμένη Μοίρα."));
+    return;
+  }
+  state.players.forEach(p => {
+    if (p.ally && p.alive && p.ally.alive && p.allyUntilRound && state.round > p.allyUntilRound) {
+      breakAlliance(p, `${p.name} και ${p.ally.name} επιβίωσαν 4 γύρους. Η αλυσίδα έσπασε.`);
+    }
+  });
 }
 
-function eliminate(player, reason = "out", role = null) {
-  const wasAlreadyOut = inList(state.eliminated, player);
-  addTo(state.eliminated, player);
-  if (!wasAlreadyOut && id(player) !== state.gameMaster) {
-    state.placements.push({
-      name: player.name,
-      role: role || revealRole(player),
-      reason
+function breakAlliance(p, message) {
+  const ally = p.ally;
+  if (!ally) return;
+  p.ally = null;
+  p.allyUntilRound = 0;
+  ally.ally = null;
+  ally.allyUntilRound = 0;
+  if (message) state.log.push(message);
+}
+
+function wheelScreen(title, labels, pickedIndex, done) {
+  const content = render("ΤΡΟΧΟΣ", title);
+  const wheel = el("div", "wheel");
+  wheel.style.background = `conic-gradient(${labels.map((_, i) => `${["#ffc84a", "#ed2d4e", "#4d85ff", "#a46fff", "#70e6ac"][i % 5]} ${i * 100 / labels.length}% ${(i + 1) * 100 / labels.length}%`).join(",")})`;
+  const wheelGroup = el("div", "wheel-group");
+  wheelGroup.append(wheel);
+  labels.forEach((label, i) => {
+    const labelNode = el("div", "wheel-label", label);
+    const angle = -90 + (i + 0.5) * (360 / labels.length);
+    labelNode.style.transform = `rotate(${angle}deg) translateY(-106px) rotate(90deg)`;
+    wheelGroup.append(labelNode);
+  });
+  const wrap = el("div", "wheel-wrap", `<div class="wheel-indicator">ΕΠΙΛΟΓΗ</div><div class="pointer"></div>`);
+  wrap.append(wheelGroup);
+  content.append(wrap);
+  const result = el("div", "panel", "Πάτα για να γυρίσει ο τροχός");
+  content.append(result);
+  content.append(actions(button("Γύρνα", "", e => {
+    e.currentTarget.disabled = true;
+    const sector = 360 / labels.length;
+    wheelGroup.style.transform = `rotate(${1800 + (360 - pickedIndex * sector - sector / 2)}deg)`;
+    setTimeout(() => { result.textContent = `Αποτέλεσμα: ${labels[pickedIndex]}`; content.append(actions(button("Συνέχεια", "secondary", done))); }, 3100);
+  })));
+}
+
+function luckWheel() {
+  const outcomes = ["Ασφαλής", "Μονομαχία", "Ψηφοφορία", "Διπλή Ψηφοφορία", "Αποχώρηση"];
+  const idx = Math.floor(Math.random() * outcomes.length);
+  wheelScreen("Τροχός Τύχης", outcomes, idx, () => {
+    const outcome = outcomes[idx];
+    if (outcome === "Ασφαλής") nextRound(true);
+    else if (outcome === "Μονομαχία") chooseTarget("Αντίπαλος", candidatesExcept(state.active), p => startMini("Μονομαχία", state.active, p));
+    else if (outcome === "Ψηφοφορία") vote(alive(), 1, false);
+    else if (outcome === "Διπλή Ψηφοφορία") vote(alive(), 2, false);
+    else confirmOut(state.active, "Τροχός Τύχης");
+  });
+}
+
+function rouletteElimination() {
+  const list = alive();
+  const idx = Math.floor(Math.random() * list.length);
+  wheelScreen("Ρουλέτα Παικτών", list.map(p => p.name), idx, () => confirmOut(list[idx], "Ρουλέτα"));
+}
+
+function startHotPotato(starter) {
+  showHotPotato(starter, 0, 3 + Math.floor(Math.random() * 10));
+}
+
+function showHotPotato(holder, passes, boomAt) {
+  state.active = holder;
+  const content = render("ΚΑΥΤΗ ΠΑΤΑΤΑ", holder.name);
+  const token = state.token;
+  content.append(hero(holder), el("div", "bomb-panel", `<div class="bomb-icon">🥔</div><div class="timer" id="timer">30</div><p>Πέτα την καυτή πατάτα πριν τελειώσει ο χρόνος. Η έκρηξη είναι κρυφή.</p>`));
+  timer(holder, token, 30);
+  content.append(grid(alive().filter(p => p !== holder), "Πέτα εδώ", target => {
+    const next = passes + 1;
+    if (next >= boomAt) confirmOut(target, "Η Καυτή Πατάτα έσκασε");
+    else showHotPotato(target, next, boomAt);
+  }));
+}
+
+function timer(holder, token, seconds) {
+  const t = qs("#timer");
+  if (!t || token !== state.token || !holder.alive) return;
+  t.textContent = seconds;
+  if (seconds <= 0) return confirmOut(holder, "Η Καυτή Πατάτα έσκασε επειδή τελείωσε ο χρόνος");
+  setTimeout(() => timer(holder, token, seconds - 1), 1000);
+}
+
+function startClickBomb() {
+  const order = alive();
+  if (state.active && order.includes(state.active)) {
+    order.splice(order.indexOf(state.active), 1);
+    order.unshift(state.active);
+  }
+  showClickBomb(order, 0, 0, 22 + Math.floor(Math.random() * 48));
+}
+
+function showClickBomb(order, index, total, boomAt) {
+  const holder = order[index];
+  const next = order[(index + 1) % order.length];
+  state.active = holder;
+  const content = render("ΠΑΤΑ ΤΟ ΚΟΥΜΠΙ", holder.name);
+  let turn = 0;
+  content.append(hero(holder), el("div", "bomb-panel", `<div class="bomb-icon">💣</div><div id="total" class="timer">${total}</div><p id="turn">Πατήματα γύρου: 0 / 6</p><p>Επόμενος: ${next.name}</p>`));
+  const pass = button(`➡ Πέρασε στον ${next.name}`, "secondary", () => showClickBomb(order, (index + 1) % order.length, total, boomAt));
+  pass.disabled = true;
+  content.append(actions(button("💣 ΠΑΤΑ ΤΟ ΚΟΥΜΠΙ", "danger", () => {
+    total++;
+    turn++;
+    qs("#total").textContent = total;
+    qs("#turn").textContent = `Πατήματα γύρου: ${turn} / 6`;
+    if (total >= boomAt) return confirmOut(holder, `Το κουμπί έσκασε στα ${total} συνολικά πατήματα`);
+    if (turn >= 6) pass.disabled = false;
+  }), pass));
+}
+
+function sacrifice() {
+  const content = render("ΘΥΣΙΑ", state.active.name);
+  content.append(hero(state.active), actions(button("Φεύγω εγώ", "", () => confirmOut(state.active, "Θυσία")), button("Φεύγουν δύο άλλοι", "secondary", () => chooseTwoOut(`Θυσία από ${state.active.name}`))));
+}
+
+function startMini(game, a, b) {
+  if (game.includes("Τρίλιζα")) startTicTacToe(a, b, 1);
+  else if (game.includes("Tap")) tapBattle(a, b, 0, 0, 30);
+  else if (game.includes("Μνήμη")) startMemory(a, b);
+  else if (game.includes("5")) startQuiz(a, b);
+  else if (game.includes("Κορώνα")) coinFlip(a, b);
+  else rpsPick(a, b, a, "");
+}
+
+function rpsPick(a, b, picker, first) {
+  const content = render("ΠΕΤΡΑ ΨΑΛΙΔΙ ΧΑΡΤΙ", picker.name);
+  content.append(paragraph(`Δώσε το κινητό στον/στην ${picker.name}. Διάλεξε κρυφά.`));
+  content.append(rpsChoices(move => picker === a ? rpsPick(a, b, b, move) : resolveRps(a, b, first, move)));
+}
+
+function resolveRps(a, b, am, bm) {
+  if (am === bm) return rpsPick(a, b, a, "");
+  const aw = (am === "Πέτρα" && bm === "Ψαλίδι") || (am === "Ψαλίδι" && bm === "Χαρτί") || (am === "Χαρτί" && bm === "Πέτρα");
+  confirmOut(aw ? b : a, "Έχασε στο Πέτρα Ψαλίδι Χαρτί");
+}
+
+function rpsChoices(onPick) {
+  const wrap = el("div", "rps-grid");
+  [
+    ["Πέτρα", "🪨"],
+    ["Ψαλίδι", "✂️"],
+    ["Χαρτί", "📄"]
+  ].forEach(([move, icon]) => {
+    const b = el("button", "rps-choice", `<span>${icon}</span><strong>${move}</strong>`);
+    b.addEventListener("click", () => onPick(move));
+    wrap.append(b);
+  });
+  return wrap;
+}
+
+function startTicTacToe(a, b, starting = 1) {
+  state.ttt = Array(9).fill(0);
+  state.tttTurn = starting;
+  showTicTacToe(a, b);
+}
+
+function showTicTacToe(a, b) {
+  const turn = state.tttTurn === 1 ? a : b;
+  const content = render("ΤΡΙΛΙΖΑ", `${turn.name} παίζει`);
+  content.append(paragraph(`${a.name} = X | ${b.name} = O`));
+  const board = el("div", "ttt");
+  state.ttt.forEach((v, i) => {
+    const cell = button(v === 1 ? "X" : v === 2 ? "O" : "", "cell", () => {
+      if (state.ttt[i]) return;
+      state.ttt[i] = state.tttTurn;
+      const winner = tttWinner();
+      if (winner === 1) confirmOut(b, "Έχασε στην Τρίλιζα");
+      else if (winner === 2) confirmOut(a, "Έχασε στην Τρίλιζα");
+      else if (state.ttt.every(Boolean)) startTicTacToe(a, b, state.tttTurn === 1 ? 2 : 1);
+      else { state.tttTurn = state.tttTurn === 1 ? 2 : 1; showTicTacToe(a, b); }
     });
+    board.append(cell);
+  });
+  content.append(board);
+}
+
+function tttWinner() {
+  const lines = [[0,1,2],[3,4,5],[6,7,8],[0,3,6],[1,4,7],[2,5,8],[0,4,8],[2,4,6]];
+  for (const [a,b,c] of lines) if (state.ttt[a] && state.ttt[a] === state.ttt[b] && state.ttt[b] === state.ttt[c]) return state.ttt[a];
+  return 0;
+}
+
+function tapBattle(a, b, as, bs, left) {
+  const content = render("TAP BATTLE", `${left} taps απομένουν`);
+  content.append(el("div", "panel", `${a.name}: ${as} | ${b.name}: ${bs}`));
+  content.append(actions(button(a.name, "danger", () => left <= 1 ? resolveTap(a, b, as + 1, bs) : tapBattle(a, b, as + 1, bs, left - 1)), button(b.name, "secondary", () => left <= 1 ? resolveTap(a, b, as, bs + 1) : tapBattle(a, b, as, bs + 1, left - 1))));
+}
+
+function resolveTap(a, b, as, bs) {
+  if (as === bs) return tapBattle(a, b, 0, 0, 10);
+  confirmOut(as < bs ? a : b, "Έχασε στο Tap Battle");
+}
+
+function startMemory(a, b) {
+  state.memory = Array.from({ length: 5 }, () => Math.floor(Math.random() * 4));
+  state.memoryStep = 3;
+  memoryPreview(a, b, a);
+}
+
+function memoryPreview(a, b, p) {
+  const content = render("ΜΝΗΜΗ", p.name);
+  content.append(el("div", "memory-view", state.memory.slice(0, state.memoryStep).map(x => x + 1).join("  ")));
+  content.append(actions(button("Το θυμήθηκα", "", () => { state.memoryInput = 0; memoryInput(a, b, p); })));
+}
+
+function memoryInput(a, b, p) {
+  const content = render("ΜΝΗΜΗ", p.name);
+  const pad = el("div", "grid");
+  [0,1,2,3].forEach(n => pad.append(button(String(n + 1), "secondary", () => {
+    if (n !== state.memory[state.memoryInput]) return confirmOut(p, "Απέτυχε στη Μνήμη");
+    state.memoryInput++;
+    if (state.memoryInput >= state.memoryStep) {
+      if (p === a) memoryPreview(a, b, b);
+      else if (state.memoryStep < state.memory.length) { state.memoryStep++; memoryPreview(a, b, a); }
+      else coinFlip(a, b);
+    } else memoryInput(a, b, p);
+  })));
+  content.append(pad);
+}
+
+function startQuiz(a, b) {
+  state.quizIndex = 0; state.quizA = 0; state.quizB = 0; quiz(a, b);
+}
+
+function quiz(a, b) {
+  const q = [["Ποιο είναι μεγαλύτερο;", "Ήλιος", "Φεγγάρι", 0], ["2 + 3 = ?", "5", "6", 0], ["Οι Android εφαρμογές έχουν APK;", "Ναι", "Όχι", 0], ["Τι έρχεται πρώτο;", "Α", "Ζ", 0], ["Η φωτιά είναι συνήθως...", "Ζεστή", "Κρύα", 0]];
+  if (state.quizIndex >= q.length) return state.quizA === state.quizB ? coinFlip(a, b) : confirmOut(state.quizA < state.quizB ? a : b, "Έχασε στις 5 Ερωτήσεις");
+  const answerer = state.quizIndex % 2 === 0 ? a : b;
+  const item = q[state.quizIndex];
+  const content = render("5 ΕΡΩΤΗΣΕΙΣ", answerer.name);
+  content.append(el("div", "panel", `Σκορ: ${a.name} ${state.quizA} - ${state.quizB} ${b.name}`), paragraph(item[0]));
+  [1,2].forEach(i => content.append(button(item[i], "secondary", () => {
+    if (i - 1 === item[3]) answerer === a ? state.quizA++ : state.quizB++;
+    state.quizIndex++;
+    quiz(a, b);
+  })));
+}
+
+function coinFlip(a, b) {
+  const content = render("ΚΟΡΩΝΑ ΓΡΑΜΜΑΤΑ", `${a.name} vs ${b.name}`);
+  content.append(hero(a), paragraph(`${a.name}, διάλεξε πλευρά. Ο/Η ${b.name} παίρνει την άλλη.`));
+  content.append(actions(button("Κορώνα", "", () => coinFlipSpin(a, b, "ΚΟΡΩΝΑ")), button("Γράμματα", "secondary", () => coinFlipSpin(a, b, "ΓΡΑΜΜΑΤΑ"))));
+}
+
+function coinFlipSpin(a, b, aPick) {
+  const result = Math.random() < .5 ? "ΚΟΡΩΝΑ" : "ΓΡΑΜΜΑΤΑ";
+  const loser = result === aPick ? b : a;
+  const content = render("ΚΟΡΩΝΑ ΓΡΑΜΜΑΤΑ", "Ρίψη");
+  const coin = el("div", "coin", "?");
+  content.append(coin, actions(button("Ρίξε το νόμισμα", "", e => {
+    const flipButton = e.currentTarget;
+    flipButton.disabled = true;
+    coin.classList.add("flip");
+    setTimeout(() => {
+      coin.textContent = result;
+      flipButton.textContent = `${loser.name} χάνει`;
+      flipButton.disabled = false;
+      flipButton.replaceWith(button(`${loser.name} χάνει`, "", () => confirmOut(loser, `Έχασε στο Κορώνα Γράμματα. Βγήκε ${result}`)));
+    }, 950);
+  })));
+}
+
+function showFinale() {
+  const [a, b] = alive();
+  finaleRound(a, b, 0, 0, 1);
+}
+
+function finaleRound(a, b, as, bs, match) {
+  if (match > 2) {
+    if (as === bs) return finaleJuryVote(a, b);
+    eliminateNow(as > bs ? b : a, "Έχασε τον τελικό Best of 2");
+    return showWinner();
   }
-  clearSpecialRole(player);
+  const test = match === 1 ? "Πέτρα Ψαλίδι Χαρτί" : "Τρίλιζα";
+  const content = render("BEST OF 2", test);
+  content.append(paragraph(`Σκορ τελικού: ${a.name} ${as} - ${bs} ${b.name}`));
+  content.append(actions(button(`Παίξε ${test}`, "", () => match === 1 ? finaleRpsPick(a, b, a, "", as, bs, match) : startFinaleTicTacToe(a, b, as, bs, match, 1))));
 }
 
-function clearSpecialRole(player) {
-  if (!player) return;
-  if (state.seer === player.name) state.seer = null;
-  if (state.witch === player.name) state.witch = null;
-  if (state.king === player.name) state.king = null;
+function finaleRpsPick(a, b, picker, first, as, bs, match) {
+  const content = render("ΤΕΛΙΚΟΣ RPS", picker.name);
+  content.append(rpsChoices(move => picker === a ? finaleRpsPick(a, b, b, move, as, bs, match) : resolveFinaleRps(a, b, first, move, as, bs, match)));
 }
 
-function shuffle(list) {
-  const copy = list.slice();
-  for (let i = copy.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [copy[i], copy[j]] = [copy[j], copy[i]];
+function resolveFinaleRps(a, b, am, bm, as, bs, match) {
+  if (am === bm) return finaleRpsPick(a, b, a, "", as, bs, match);
+  const aw = (am === "Πέτρα" && bm === "Ψαλίδι") || (am === "Ψαλίδι" && bm === "Χαρτί") || (am === "Χαρτί" && bm === "Πέτρα");
+  finaleRound(a, b, aw ? as + 1 : as, aw ? bs : bs + 1, match + 1);
+}
+
+function startFinaleTicTacToe(a, b, as, bs, match, starting = 1) {
+  state.ttt = Array(9).fill(0);
+  state.tttTurn = starting;
+  showFinaleTicTacToe(a, b, as, bs, match);
+}
+
+function showFinaleTicTacToe(a, b, as, bs, match) {
+  const turn = state.tttTurn === 1 ? a : b;
+  const content = render("ΤΕΛΙΚΟΣ ΤΡΙΛΙΖΑ", `${turn.name} παίζει`);
+  content.append(paragraph(`${a.name} = X | ${b.name} = O`));
+  const board = el("div", "ttt");
+  state.ttt.forEach((v, i) => board.append(button(v === 1 ? "X" : v === 2 ? "O" : "", "cell", () => {
+    if (state.ttt[i]) return;
+    state.ttt[i] = state.tttTurn;
+    const winner = tttWinner();
+    if (winner === 1) finaleRound(a, b, as + 1, bs, match + 1);
+    else if (winner === 2) finaleRound(a, b, as, bs + 1, match + 1);
+    else if (state.ttt.every(Boolean)) startFinaleTicTacToe(a, b, as, bs, match, state.tttTurn === 1 ? 2 : 1);
+    else { state.tttTurn = state.tttTurn === 1 ? 2 : 1; showFinaleTicTacToe(a, b, as, bs, match); }
+  })));
+  content.append(board);
+}
+
+function finaleJuryVote(a, b) {
+  if (!state.eliminated.length) return diceFinale(a, b);
+  const votes = new Map();
+  finaleJuryStep(a, b, votes, 0);
+}
+
+function finaleJuryStep(a, b, votes, index) {
+  const content = render("ΨΗΦΟΦΟΡΙΑ ΤΕΛΙΚΟΥ", index >= state.eliminated.length ? "Αποτέλεσμα" : state.eliminated[index].name);
+  content.append(scoreboard([a, b], votes));
+  if (index >= state.eliminated.length) {
+    const av = votes.get(a) || 0, bv = votes.get(b) || 0;
+    if (av === bv) content.append(actions(button("Ισοπαλία - Ρίξε ζάρι", "", () => diceFinale(a, b))));
+    else { eliminateNow(av > bv ? b : a, "Έχασε στην ψηφοφορία τελικού"); showWinner(); }
+    return;
   }
-  return copy;
+  const voter = state.eliminated[index];
+  content.append(hero(voter), paragraph(`${voter.name} ψηφίζει ποιον θέλει νικητή.`), grid([a, b], "Ψήφος νικητή", p => { votes.set(p, (votes.get(p) || 0) + 1); finaleJuryStep(a, b, votes, index + 1); }));
 }
 
-function speak(value) {
-  if (!("speechSynthesis" in window)) return;
-  unlockSpeech();
-  window.speechSynthesis.cancel();
-  activeUtterance = new SpeechSynthesisUtterance(ttsText(value));
-  activeUtterance.lang = "en-US";
-  activeUtterance.rate = 0.88;
-  activeUtterance.pitch = 1;
-  const voice = bestEnglishVoice();
-  if (voice) activeUtterance.voice = voice;
-  activeUtterance.onend = () => { activeUtterance = null; };
-  activeUtterance.onerror = () => { activeUtterance = null; };
-  window.speechSynthesis.speak(activeUtterance);
-  setTimeout(() => window.speechSynthesis.resume(), 80);
+function diceFinale(a, b) {
+  const content = render("ΖΑΡΙ ΤΕΛΙΚΟΥ", `${a.name} vs ${b.name}`);
+  const da = diceBox("?"), db = diceBox("?");
+  const result = el("div", "panel", "Κάθε φιναλίστ ρίχνει μία φορά. Μεγαλύτερος αριθμός κερδίζει.");
+  const actionBox = actions();
+  const roll = button("Ρίξτε τα ζάρια", "", e => {
+    const rollButton = e.currentTarget;
+    rollButton.disabled = true;
+    const av = 1 + Math.floor(Math.random() * 6), bv = 1 + Math.floor(Math.random() * 6);
+    da.classList.add("roll"); db.classList.add("roll");
+    setTimeout(() => {
+      da.classList.remove("roll"); db.classList.remove("roll");
+      da.innerHTML = dicePips(av); db.innerHTML = dicePips(bv);
+      if (av === bv) {
+        result.textContent = `Ισοπαλία ${av}-${bv}. Ρίξτε ξανά.`;
+        rollButton.textContent = "Ισοπαλία - ξανά ρίψη";
+        rollButton.disabled = false;
+        return;
+      }
+      const winner = av > bv ? a : b;
+      const loser = av > bv ? b : a;
+      result.textContent = `${a.name}: ${av} | ${b.name}: ${bv}. ${winner.name} κερδίζει.`;
+      actionBox.replaceChildren(button("Συνέχεια", "", () => { eliminateNow(loser, "Έχασε στο ζάρι τελικού"); showWinner(); }));
+    }, 800);
+  });
+  actionBox.append(roll);
+  content.append(result, el("div", "panel", a.name), da, el("div", "panel", b.name), db, actionBox);
 }
 
-function unlockSpeech() {
-  if (!("speechSynthesis" in window)) return;
-  speechUnlocked = true;
-  window.speechSynthesis.resume();
-  window.speechSynthesis.getVoices();
+function diceBox(value) {
+  const d = el("div", "dice", value);
+  return d;
 }
 
-function bestEnglishVoice() {
-  if (!("speechSynthesis" in window)) return null;
-  const voices = window.speechSynthesis.getVoices();
-  return voices.find(voice => voice.lang === "en-US" && /samantha|ava|allison|google|natural/i.test(voice.name))
-    || voices.find(voice => voice.lang === "en-US")
-    || voices.find(voice => voice.lang && voice.lang.startsWith("en"))
-    || null;
+function dicePips(value) {
+  const map = { 1: ["c"], 2: ["tl","br"], 3: ["tl","c","br"], 4: ["tl","tr","bl","br"], 5: ["tl","tr","c","bl","br"], 6: ["tl","tr","ml","mr","bl","br"] };
+  return `<div class="pips">${map[value].map(x => `<span class="pip ${x}"></span>`).join("")}</div>`;
 }
 
-function ttsText(value) {
-  return value
-    .replaceAll("Alex", "Alex")
-    .replaceAll("Rino", "Reeno")
-    .replaceAll("Billy", "Billy")
-    .replaceAll("Demarin", "Deh mareen")
-    .replaceAll("Elisa", "Elisa Lanchava")
-    .replaceAll("Evelyn", "Evelyn")
-    .replaceAll("Sargenie", "Sarjeenee")
-    .replaceAll("Sorina", "Soreena")
-    .replaceAll("Evaggelia", "Evangelia")
-    .replaceAll("Zoe", "Zoey");
+function finalRanking() {
+  const ranking = [];
+  const winner = alive()[0];
+  if (winner) ranking.push(winner);
+  [...state.eliminated].reverse().forEach(p => {
+    if (!ranking.includes(p)) ranking.push(p);
+  });
+  state.players.forEach(p => {
+    if (!ranking.includes(p)) ranking.push(p);
+  });
+  return ranking;
 }
 
-function playSound(kind) {
-  stopSound();
-  const files = {
-    isopalia: "assets/audio/isopalia.mp3",
-    spirits: "assets/audio/spirits_victory.mp3",
-    oneVillain: "assets/audio/one_villain_victory.mp3",
-    manyVillains: "assets/audio/many_villains_victory.mp3"
-  };
-  currentAudio = new Audio(files[kind]);
-  currentAudio.play().catch(() => {});
+function rankingPanel() {
+  const panel = el("div", "ranking panel");
+  panel.append(el("h2", "", "Τελική κατάταξη"));
+  finalRanking().forEach((p, index) => {
+    const row = el("div", "rank-row");
+    row.innerHTML = `<span class="rank-num">#${index + 1}</span><img class="rank-avatar" src="${img(p)}" alt="${p.name}"><strong>${p.name}</strong><span class="label">${index === 0 ? "Νικητής" : `Θέση ${index + 1}`}</span>`;
+    panel.append(row);
+  });
+  return panel;
 }
 
-function stopSound() {
-  if (!currentAudio) return;
-  currentAudio.pause();
-  currentAudio.currentTime = 0;
-  currentAudio = null;
+function showWinner() {
+  playMusic("./audio/many_villains_victory.mp3", { loop: true, volume: 0.82 });
+  const winner = alive()[0];
+  const content = render("ΝΙΚΗΤΗΣ", winner ? winner.name : "Κανένας");
+  if (winner) content.append(hero(winner));
+  content.append(rankingPanel());
+  addLog(content, 20);
+  content.append(actions(button("Νέο παιχνίδι", "", showHome)));
 }
 
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => navigator.serviceWorker.register("./service-worker.js").catch(() => {}));
 }
 
-document.addEventListener("click", () => {
-  unlockSpeech();
-  if (screen.orientation && screen.orientation.lock) {
-    screen.orientation.lock("portrait").catch(() => {});
-  }
-}, { once: true });
-
-window.addEventListener("orientationchange", () => {
-  setTimeout(() => {
-    if (screen.orientation && screen.orientation.lock) {
-      screen.orientation.lock("portrait").catch(() => {});
-    }
-  }, 250);
-});
-
-showIntroVideo();
+showLoading();
