@@ -1,6 +1,6 @@
 {
-  "name": "Spirits",
-  "short_name": "Spirits",
+  "name": "Spirits Night",
+  "short_name": "Spirits Night",
   "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",

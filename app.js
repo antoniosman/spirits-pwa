@@ -170,7 +170,7 @@ function screen(kicker, title) {
   $app.textContent = "";
   const root = h("section", { className: "screen" });
   root.append(
-    h("div", { className: "brand", text: "SPIRITS" }),
+    h("div", { className: "brand", text: "SPIRITS NIGHT" }),
     h("div", { className: "kicker", text: kicker }),
     h("h1", { className: "title", text: title })
   );
@@ -304,7 +304,7 @@ function finishIntro() {
 
 function showIntro() {
   state = freshState();
-  const root = screen("κεντρικός συντονιστής", "Spirits");
+  const root = screen("κεντρικός συντονιστής", "Spirits Night");
   root.append(
     h("h2", { className: "title hero-title", text: "Game Master Mode" }),
     paragraph("Βάλε το iPad στη μέση. Ο πρώτος παίκτης που πεθαίνει γίνεται Game Master και από εδώ ελέγχει δολοφόνους, ειδικούς ρόλους, νύχτα και ψηφοφορίες.", "center"),
@@ -355,8 +355,9 @@ function showSetupCounts() {
 
 function showPlayerSelection() {
   const root = screen("επιλογή παρέας", "Ποιοι παίζουν;");
-  root.append(pill(`${state.gamePlayers.length} / ${state.playerCount} επιλεγμένοι`));
-  root.append(grid(roster.map(player => playerCard(player, {
+  const selectedCount = state.gamePlayers.length;
+  const ready = selectedCount === state.playerCount;
+  const selectionGrid = grid(roster.map(player => playerCard(player, {
     selected: inList(state.gamePlayers, player),
     onClick: () => {
       if (inList(state.gamePlayers, player)) removeFrom(state.gamePlayers, player);
@@ -364,11 +365,42 @@ function showPlayerSelection() {
       else return toast(`Έχεις ήδη διαλέξει ${state.playerCount} παίκτες.`);
       showPlayerSelection();
     }
-  }))));
-  root.append(actions(button("Συνέχεια", () => {
-    if (state.gamePlayers.length !== state.playerCount) return toast(`Διάλεξε ακριβώς ${state.playerCount} παίκτες.`);
-    showGameMasterSelection();
   })));
+  selectionGrid.classList.add("selection-grid");
+  root.append(h("section", { className: "selection-layout" }, [
+    h("aside", { className: "selection-control panel" }, [
+      h("div", { className: "label", text: "SETUP" }),
+      h("div", { className: "selection-count", text: `${selectedCount} / ${state.playerCount}` }),
+      h("div", { className: "selection-note", text: ready ? "Έτοιμο. Όλοι οι παίκτες επιλέχθηκαν." : `Διάλεξε ακόμα ${state.playerCount - selectedCount}.` }),
+      counterBlock("Παίκτες", state.playerCount, () => {
+        state.playerCount = Math.max(5, state.playerCount - 1);
+        while (state.gamePlayers.length > state.playerCount) state.gamePlayers.pop();
+        state.killerCount = Math.max(1, Math.min(state.killerCount, maxKillers()));
+        showPlayerSelection();
+      }, () => {
+        state.playerCount = Math.min(roster.length, state.playerCount + 1);
+        state.killerCount = Math.max(1, Math.min(state.killerCount, maxKillers()));
+        showPlayerSelection();
+      }),
+      counterBlock("Δολοφόνοι", state.killerCount, () => {
+        state.killerCount = Math.max(1, state.killerCount - 1);
+        showPlayerSelection();
+      }, () => {
+        const max = maxKillers();
+        if (state.killerCount >= max) return toast(`Maximum ${max} δολοφόνοι για ${state.playerCount} παίκτες.`);
+        state.killerCount += 1;
+        showPlayerSelection();
+      }, "var(--danger)"),
+      actions(button("Συνέχεια", () => {
+        if (state.gamePlayers.length !== state.playerCount) return toast(`Διάλεξε ακριβώς ${state.playerCount} παίκτες.`);
+        showGameMasterSelection();
+      }))
+    ]),
+    h("div", { className: "selection-list" }, [
+      pill(`${selectedCount} / ${state.playerCount} επιλεγμένοι`),
+      selectionGrid
+    ])
+  ]));
 }
 
 function showGameMasterSelection() {
@@ -507,7 +539,7 @@ function showDashboard() {
     button("Νύχτα", showNightStart),
     button("Ψηφοφορία ημέρας", startDayVoting, "secondary"),
     button("Χειροκίνητη αποχώρηση", showManualElimination, "secondary"),
-    button("Test voice", () => speak("Spirits voice test. Alex voted Billy."), "ghost")
+    button("Test voice", () => speak("Spirits Night voice test."), "ghost")
   ));
   addHistory(root);
 }
@@ -1023,7 +1055,7 @@ function showPlacements() {
     .reverse()
     .filter(entry => !finalPlayers.some(player => player.name === entry.name));
   const root = screen("placements", "Τελική κατάταξη");
-  root.append(h("div", { className: "placement-subtitle", text: "Spirits: Final Files" }));
+  root.append(h("div", { className: "placement-subtitle", text: "Spirits Night: Final Files" }));
   playSound(state.lastVictorySound || "spirits");
 
   const board = h("section", { className: "placements-board" });

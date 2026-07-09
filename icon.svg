@@ -1,9 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
-  <rect width="512" height="512" rx="112" fill="#100a17"/>
-  <circle cx="256" cy="250" r="152" fill="#22182d" stroke="#ff7eb6" stroke-width="18"/>
-  <path d="M256 116c74 0 124 56 124 128 0 88-62 152-124 152s-124-64-124-152c0-72 50-128 124-128Z" fill="#fdf4ff"/>
-  <circle cx="210" cy="242" r="21" fill="#100a17"/>
-  <circle cx="302" cy="242" r="21" fill="#100a17"/>
-  <path d="M220 318c22 18 50 18 72 0" fill="none" stroke="#100a17" stroke-width="18" stroke-linecap="round"/>
-  <path d="M150 108 110 68M362 108l40-40M256 92V42" stroke="#b190ff" stroke-width="18" stroke-linecap="round"/>
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="18%" r="75%">
+      <stop offset="0%" stop-color="#3b1737"/>
+      <stop offset="100%" stop-color="#100a17"/>
+    </radialGradient>
+    <linearGradient id="ghost" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#ffd2e7"/>
+      <stop offset="52%" stop-color="#ff7eb6"/>
+      <stop offset="100%" stop-color="#d93b85"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="184" fill="none" stroke="#ff7eb6" stroke-width="18" opacity=".42"/>
+  <path d="M132 398V228c0-78 52-134 124-134s124 56 124 134v170c0 20-22 32-39 20l-28-20-28 24c-16 14-42 14-58 0l-28-24-28 20c-17 12-39 0-39-20Z" fill="url(#ghost)"/>
+  <path d="M172 392V232c0-57 34-96 84-96s84 39 84 96v160l-26-18-30 26c-16 14-40 14-56 0l-30-26-26 18Z" fill="#fff" opacity=".16"/>
+  <circle cx="214" cy="244" r="24" fill="#100a17"/>
+  <circle cx="298" cy="244" r="24" fill="#100a17"/>
+  <path d="M225 316c22 17 40 17 62 0" fill="none" stroke="#100a17" stroke-width="18" stroke-linecap="round"/>
+  <path d="M139 146l-31-31M373 146l31-31M256 82V40" stroke="#b190ff" stroke-width="16" stroke-linecap="round"/>
 </svg>

@@ -14,7 +14,7 @@
 * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
 html, body { margin: 0; min-height: 100%; background: var(--bg); color: var(--ink); font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
 body { padding: env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left); }
-button { font: inherit; }
+button { font: inherit; appearance: none; -webkit-appearance: none; touch-action: manipulation; }
 
 #app { min-height: 100svh; background: radial-gradient(circle at 50% 0%, rgba(255,126,182,.18), transparent 34%), var(--bg); }
 .screen {
@@ -23,7 +23,6 @@ button { font: inherit; }
   min-height: 100svh;
   margin: 0 auto;
   padding: 22px 18px 30px;
-  animation: fadeIn .28s ease both;
   overflow: hidden;
   isolation: isolate;
 }
@@ -103,7 +102,6 @@ button { font: inherit; }
 
 .actions { display: grid; gap: 12px; margin-top: 14px; }
 .btn { position: relative; overflow: hidden; width: 100%; min-height: 52px; border: 0; border-radius: 14px; padding: 12px 16px; font-weight: 900; color: #1f0f1d; background: var(--pink); box-shadow: 0 10px 22px var(--shadow); }
-.btn:active { transform: scale(.98); }
 .btn.secondary { color: var(--ink); background: var(--panel2); border: 1px solid var(--lilac); }
 .btn.ghost { color: var(--muted); background: transparent; border: 1px solid var(--panel2); box-shadow: none; }
 .counter { margin: 14px 0; }
@@ -111,6 +109,16 @@ button { font: inherit; }
 .counter-number { margin: 8px 0 10px; padding: 14px 0; text-align: center; font-size: 52px; font-weight: 900; border-radius: 18px; background: var(--panel); border: 1px solid currentColor; }
 .counter-controls { display: flex; justify-content: center; gap: 10px; }
 .small { width: 56px; min-height: 46px; border-radius: 12px; border: 1px solid var(--lilac); background: var(--panel2); color: var(--ink); font-size: 24px; font-weight: 900; }
+
+.selection-layout { display: grid; grid-template-columns: minmax(230px, 300px) minmax(0, 1fr); gap: 12px; align-items: start; }
+.selection-control { position: sticky; top: max(12px, env(safe-area-inset-top)); margin: 10px 0; border-color: rgba(255,126,182,.5); background: linear-gradient(180deg, rgba(54,37,68,.94), rgba(34,24,45,.94)); }
+.selection-control .label { color: var(--pink); font-size: 12px; font-weight: 900; letter-spacing: .1em; }
+.selection-control .counter { margin: 12px 0; }
+.selection-control .counter-number { font-size: 38px; padding: 10px 0; }
+.selection-count { margin-top: 8px; font-size: clamp(42px, 10vw, 64px); line-height: .95; font-weight: 1000; color: var(--mint); text-align: center; text-shadow: 0 0 22px rgba(137,238,196,.28); }
+.selection-note { min-height: 38px; margin: 8px 0 10px; color: var(--muted); text-align: center; font-weight: 850; line-height: 1.25; }
+.selection-list { min-width: 0; }
+.selection-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin: 10px 0; }
 @media (min-width: 760px) { .grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
@@ -205,6 +213,15 @@ button { font: inherit; }
   .placement-card img { width: min(14vw, 128px); }
 }
 
+@media (min-width: 900px) {
+  .selection-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (max-width: 720px) {
+  .selection-layout { grid-template-columns: 1fr; }
+  .selection-control { position: relative; top: auto; }
+}
+
 #toast { position: fixed; left: 50%; bottom: max(18px, env(safe-area-inset-bottom)); transform: translateX(-50%) translateY(18px); max-width: min(92vw, 520px); padding: 12px 16px; border-radius: 999px; background: rgba(20, 12, 28, .94); color: var(--ink); box-shadow: 0 16px 34px var(--shadow); opacity: 0; pointer-events: none; transition: .2s ease; z-index: 20; text-align: center; }
 #toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 #rotate-lock { display: none; position: fixed; inset: 0; z-index: 50; place-items: center; padding: 28px; background: #100a17; color: var(--ink); text-align: center; }
@@ -216,7 +233,6 @@ button { font: inherit; }
   #rotate-lock { display: grid; }
 }
 
-@keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
 @keyframes rise { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
 @keyframes glideUp { from { opacity: 0; transform: translateY(24px) scale(.94); filter: blur(5px); } to { opacity: 1; transform: translateY(0) scale(1); filter: blur(0); } }
 @keyframes popIn { from { opacity: 0; transform: scale(.96); } to { opacity: 1; transform: scale(1); } }
