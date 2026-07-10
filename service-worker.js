@@ -1,4 +1,4 @@
-const CACHE_NAME = "spirits-pwa-v10";
+const CACHE_NAME = "spirits-pwa-v11";
 const ASSETS = [
   "./",
   "./index.html",

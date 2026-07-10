@@ -539,7 +539,8 @@ function showDashboard() {
     button("Νύχτα", showNightStart),
     button("Ψηφοφορία ημέρας", startDayVoting, "secondary"),
     button("Χειροκίνητη αποχώρηση", showManualElimination, "secondary"),
-    button("Test voice", () => speak("Spirits Night voice test."), "ghost")
+    button("Test voice", () => speak("Spirits Night voice test."), "ghost"),
+    button("Test names", () => speak("Alex. Rino. Billy. Elisa. Evelyn. Sargenie. Sorina. Evaggelia. Zoe. Smaragda. Jasmine."), "ghost")
   ));
   addHistory(root);
 }
@@ -1169,17 +1170,17 @@ function bestEnglishVoice() {
 function ttsText(value) {
   const pronunciations = {
     Alex: "Alex",
-    Rino: "Reeno",
+    Rino: "Ree no",
     Billy: "Billy",
     Demarin: "Deh mareen",
-    Elisa: "Elisso Lanchava",
-    Evelyn: "Eh vuh lin",
-    Sargenie: "Sar jee nee",
-    Sorina: "So ree na",
-    Evaggelia: "Evangelia",
+    Elisa: "Eh lee sah Lan cha vah",
+    Evelyn: "Ev uh lin",
+    Sargenie: "Sar jeh nee",
+    Sorina: "So ree nah",
+    Evaggelia: "Eh van geh lee ah",
     Zoe: "Zoey",
-    Smaragda: "Smaragdenia",
-    Jasmine: "Yasmeen"
+    Smaragda: "Smah rag then yah",
+    Jasmine: "Yaz meen"
   };
   return Object.entries(pronunciations).reduce(
     (text, [name, spoken]) => text.replace(new RegExp(`\\b${name}\\b`, "g"), spoken),
