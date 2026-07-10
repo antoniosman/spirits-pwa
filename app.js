@@ -1167,17 +1167,24 @@ function bestEnglishVoice() {
 }
 
 function ttsText(value) {
-  return value
-    .replaceAll("Alex", "Alex")
-    .replaceAll("Rino", "Reeno")
-    .replaceAll("Billy", "Billy")
-    .replaceAll("Demarin", "Deh mareen")
-    .replaceAll("Elisa", "Elisa Lanchava")
-    .replaceAll("Evelyn", "Evelyn")
-    .replaceAll("Sargenie", "Sarjeenee")
-    .replaceAll("Sorina", "Soreena")
-    .replaceAll("Evaggelia", "Evangelia")
-    .replaceAll("Zoe", "Zoey");
+  const pronunciations = {
+    Alex: "Alex",
+    Rino: "Reeno",
+    Billy: "Billy",
+    Demarin: "Deh mareen",
+    Elisa: "Elisso Lanchava",
+    Evelyn: "Eh vuh lin",
+    Sargenie: "Sar jee nee",
+    Sorina: "So ree na",
+    Evaggelia: "Evangelia",
+    Zoe: "Zoey",
+    Smaragda: "Smaragdenia",
+    Jasmine: "Yasmeen"
+  };
+  return Object.entries(pronunciations).reduce(
+    (text, [name, spoken]) => text.replace(new RegExp(`\\b${name}\\b`, "g"), spoken),
+    value
+  );
 }
 
 function playSound(kind) {
